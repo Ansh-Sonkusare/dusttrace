@@ -26,7 +26,8 @@ Full product spec: `docs/product/PRD.md` (also as a PDF).
 | Design system | `docs/design-system.md` | Source of truth for every visual |
 | **MVP engine** | `services/engine` (Python) | Working end to end; 10 tests pass |
 | **MVP console** | `apps/web` (Next.js) | Overview, Forecast, Sites, Site detail, `/api/run` |
-| DB schema | `supabase/migrations/0001_init.sql` | Postgres 16 + PostGIS |
+| DB schema | `supabase/migrations/` (`0001_init`, `0002_lock_rest_api`) | Postgres + PostGIS; tables closed to Supabase's REST API |
+| **Supabase project** | `dusttrace`, ref `utcdxirkqpvtwndswfyn`, ap-south-1, free plan | Schema and seed loaded; no readings or runs yet |
 | CI + hourly job | `.github/workflows/` | CI on push; the hourly job waits for the `DATABASE_URL` secret |
 
 Claude artifacts from the original chat (they belong to Ansh's account and can be opened in claude.ai):
@@ -102,9 +103,12 @@ Use at least 420 days of history. With 120 days the holdout crosses a season cha
 
 ## Next milestones (suggested order)
 
-1. **Supabase project:** create it in the Mumbai region (ap-south-1), enable PostGIS, run `python -m dusttrace init-db && python -m dusttrace seed`.
-   - Add the repo secrets `DATABASE_URL` (pooler URL) and `OPENAQ_API_KEY`.
+1. **Supabase project:** done. The project `dusttrace` (ref `utcdxirkqpvtwndswfyn`, Mumbai) has both migrations and the K-East seed applied. Still to do, by a person:
+   - Set the database password (Project Settings > Database > Reset database password). It was never shown when the project was created.
+   - Copy the **Session pooler** URI from the dashboard's Connect button. GitHub runners have no IPv6, so the direct `db.<ref>.supabase.co` host won't work from Actions.
+   - Add the repo secrets `DATABASE_URL` (that URI) and `OPENAQ_API_KEY`.
    - Trigger the "Hourly forecast" workflow once by hand with `days=420` to backfill. From then on it runs at :17 every hour.
+   - The workflow only runs `ingest` and `run`. Apply any new migration with `python -m dusttrace init-db` (all migrations are safe to re-run) or the Supabase MCP, and give every new table `enable row level security`.
 2. **Verify live data:** check the run's `data_mode` is `live`, the stations are real CPCB sites in or near K-East, and `dusttrace osm` loads real schools and hospitals. Fix any parser drift.
 3. **Deploy the console** on Vercel, root `apps/web`, env `DATABASE_URL`. Add a basic password, because ward data is sensitive.
 4. **Calibrate:** compare plume increments with station deltas downwind of real sites, tune the emission factors, and reach about 80% coverage for the quantile band.
