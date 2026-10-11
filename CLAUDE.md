@@ -5,12 +5,13 @@ Start with `HANDOFF.md` (context, status, next steps) and `docs/design-system.md
 ## Layout
 - `services/engine`: Python package `dusttrace` (ingest, LightGBM forecast, Gaussian plume, Safe-Work Windows). CLI: `python -m dusttrace <cmd>`.
 - `apps/web`: Next.js 16 App Router console (React 19, TypeScript 5, `pg`, MapLibre). Server components query Postgres directly in `lib/queries.ts`.
-- `supabase/migrations`: SQL schema (Postgres 16 + PostGIS). Add new numbered files; never edit applied ones.
+- `supabase/migrations`: SQL schema (Postgres 16 + PostGIS). Add new numbered files; never edit applied ones. Every migration must be safe to re-run (the hourly job runs `init-db`), and every new table gets `enable row level security`.
 - `data/seed/k-east.json`: ward, seed stations, demo sites and receptors (approximate positions, `demo: true`).
 - `docs/`: PRD, pitch deck (PDF, PPTX, HTML source), prototype, video kit, screenshots.
 
 ## Commands
-- Engine tests: `cd services/engine && pytest -q`
+- Engine tests: `cd services/engine && pytest -q`. Database tests need `TEST_DATABASE_URL` (Postgres + PostGIS; the tests wipe it) and run in CI against a PostGIS service.
+- Work is tracked as GitHub issues; write the test first, one PR per issue.
 - Full local run: `python -m dusttrace all` (needs `DATABASE_URL`; default `postgresql://postgres@localhost:5432/dusttrace`)
 - Web: `cd apps/web && npm run typecheck && npm run build`; dev server `npm run dev`
 - `predev`/`prebuild` copy the MapLibre worker into `public/maplibre/` (MapLibre can't find its worker under the Next bundler). Don't remove it.

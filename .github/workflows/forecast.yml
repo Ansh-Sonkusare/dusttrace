@@ -47,6 +47,9 @@ jobs:
           cache: pip
       - if: steps.gate.outputs.ok == 'true'
         run: pip install -e .
+      - name: Apply migrations
+        if: steps.gate.outputs.ok == 'true'
+        run: python -m dusttrace init-db
       - name: Ingest
         if: steps.gate.outputs.ok == 'true'
         run: python -m dusttrace ingest --mode "${{ inputs.mode || 'auto' }}" --days "${{ inputs.days || '3' }}"
