@@ -1,0 +1,36 @@
+name: Weekly receptors
+
+# Refreshes schools and hospitals from OpenStreetMap. Weekly is plenty: they rarely change.
+# Needs the DATABASE_URL repository secret, like the hourly forecast.
+
+on:
+  schedule:
+    - cron: "43 1 * * 1"
+  workflow_dispatch:
+
+jobs:
+  osm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    defaults:
+      run:
+        working-directory: services/engine
+    steps:
+      - name: Check secrets
+        id: gate
+        working-directory: .
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "DATABASE_URL secret not set, skipping."; echo "ok=false" >> "$GITHUB_OUTPUT"; else echo "ok=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.ok == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.gate.outputs.ok == 'true'
+        run: pip install -e .
+      - if: steps.gate.outputs.ok == 'true'
+        run: python -m dusttrace init-db && python -m dusttrace osm

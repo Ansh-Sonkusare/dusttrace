@@ -72,6 +72,18 @@ def upsert_receptors(conn, recs: list[dict], ward_id: str) -> None:
         )
 
 
+# Real OSM schools and hospitals replace the demo ones once loaded. Demo housing stays until a real
+# population source exists.
+RECEPTORS_SQL = """select id, name, kind, lat, lon, population, source from receptors r
+  where ward_id=%s and not (source = 'seed' and kind in ('school', 'hospital') and exists (
+    select 1 from receptors o where o.ward_id = r.ward_id and o.source = 'osm'))
+  order by id"""
+
+
+def read_receptors(conn, ward_id: str) -> pd.DataFrame:
+    return read_frame(conn, RECEPTORS_SQL, (ward_id,))
+
+
 def write_readings(conn, df: pd.DataFrame, synthetic: bool) -> int:
     if df.empty:
         return 0

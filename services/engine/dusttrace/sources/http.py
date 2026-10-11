@@ -16,11 +16,19 @@ log = logging.getLogger("dusttrace")
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
-def get(client: httpx.Client, url: str, params: dict | None = None, tries: int = 4,
-        backoff: float = 2.0, sleep=time.sleep) -> httpx.Response:
+def get(client: httpx.Client, url: str, params: dict | None = None, **kw) -> httpx.Response:
+    return request(client, "GET", url, params=params, **kw)
+
+
+def post(client: httpx.Client, url: str, data: dict | None = None, **kw) -> httpx.Response:
+    return request(client, "POST", url, data=data, **kw)
+
+
+def request(client: httpx.Client, method: str, url: str, tries: int = 4, backoff: float = 2.0,
+            sleep=time.sleep, **kw) -> httpx.Response:
     for attempt in range(1, tries + 1):
         try:
-            r = client.get(url, params=params)
+            r = client.request(method, url, **kw)
         except (httpx.TimeoutException, httpx.TransportError) as e:
             if attempt == tries:
                 raise

@@ -73,3 +73,12 @@ def test_fresh_real_station_replaces_the_samples(conn, settings):
     out = pipeline.run(conn, settings)
     assert out["stations"] == ["openaq-1"]
     assert out["data_mode"] == "mixed"  # real readings, synthetic weather
+
+
+def test_osm_schools_and_hospitals_replace_the_demo_ones(conn):
+    kinds = lambda: sorted({(r["kind"], r["source"]) for r in db.read_receptors(conn, "K-East").to_dict("records")})
+    assert ("school", "seed") in kinds()
+    db.upsert_receptors(conn, [{"id": "osm-node-1", "name": "Real School", "kind": "school", "lat": 19.11,
+                                "lon": 72.86, "population": 800, "source": "osm"}], "K-East")
+    conn.commit()
+    assert kinds() == [("housing", "seed"), ("school", "osm")]

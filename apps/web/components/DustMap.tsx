@@ -67,7 +67,7 @@ export default function DustMap({ center, sites, receptors, stations, hours }: {
         data: { type: "FeatureCollection", features: receptors.map((r) => ({ type: "Feature", properties: { name: r.name, kind: r.kind }, geometry: { type: "Point", coordinates: [r.lon, r.lat] } })) },
       });
       m.addLayer({ id: "receptors", type: "circle", source: "receptors", paint: { "circle-radius": 5, "circle-color": "#F2F2F2", "circle-stroke-color": "#0B0B0C", "circle-stroke-width": 2 } });
-      m.addLayer({ id: "receptor-labels", type: "symbol", source: "receptors", layout: { "text-field": ["get", "name"], "text-size": 11, "text-offset": [0, 1.2], "text-anchor": "top", "text-optional": true }, paint: { "text-color": "#A3A3A8", "text-halo-color": "#0B0B0C", "text-halo-width": 1.5 } });
+      m.addLayer({ id: "receptor-labels", type: "symbol", source: "receptors", minzoom: 14, layout: { "text-field": ["get", "name"], "text-size": 11, "text-offset": [0, 1.2], "text-anchor": "top", "text-optional": true }, paint: { "text-color": "#A3A3A8", "text-halo-color": "#0B0B0C", "text-halo-width": 1.5 } });
 
       m.addSource("stations", {
         type: "geojson",

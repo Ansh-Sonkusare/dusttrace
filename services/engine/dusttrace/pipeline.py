@@ -106,9 +106,14 @@ def ingest(conn, settings: Settings, mode: str = "auto", days: int = 120) -> dic
     return report
 
 
+def receptor_bbox(ward_bbox: list[float], margin_deg: float = 0.01) -> list[float]:
+    """Ward bbox plus about 1 km, so plumes that cross the ward boundary still find receptors."""
+    return _expand(ward_bbox, margin_deg)
+
+
 def load_receptors_osm(conn, settings: Settings) -> int:
     seed = load_seed()
-    recs = overpass.fetch(seed["ward"]["bbox"])
+    recs = overpass.fetch(receptor_bbox(seed["ward"]["bbox"]))
     db.upsert_receptors(conn, recs, seed["ward"]["id"])
     conn.commit()
     return len(recs)
@@ -142,7 +147,7 @@ def run(conn, settings: Settings) -> dict:
     ward_fc = fc[fc["station_id"] == "ward"].set_index("ts")["p_exceed"]
     future = wx[(wx["ts"] > t0) & (wx["ts"] <= t0 + pd.Timedelta(hours=settings.horizon_hours))]
     sites = db.read_frame(conn, "select id, name, activity, lat, lon, area_m2 from sites where ward_id=%s", (ward_id,))
-    recs = db.read_frame(conn, "select id, name, kind, lat, lon, population from receptors where ward_id=%s", (ward_id,))
+    recs = db.read_receptors(conn, ward_id)
     for c in ["lat", "lon", "area_m2"]:
         sites[c] = sites[c].astype(float)
     for c in ["lat", "lon"]:

@@ -54,6 +54,62 @@ def test_overpass_parse():
     assert recs[1]["lat"] == 19.12
 
 
+def _osm(type_, id_, name, amenity, lat=19.11, lon=72.86, **tags):
+    el = {"type": type_, "id": id_, "tags": {"amenity": amenity, **({"name": name} if name else {}), **tags}}
+    if type_ == "node":
+        el.update(lat=lat, lon=lon)
+    else:
+        el["center"] = {"lat": lat, "lon": lon}
+    return el
+
+
+def test_overpass_keeps_inpatient_places_and_drops_clinics():
+    els = [_osm("node", 1, "Nanavati Hospital", "hospital"),
+           _osm("node", 2, "Mukund Maternity and Surgical Nursing Home", "hospital", lat=19.12),
+           _osm("node", 3, "Vatsal Nicu and Childrens Hospital", "hospital", lat=19.13),
+           _osm("node", 4, "Powai Dental Clinic", "hospital", lat=19.10),
+           _osm("node", 5, "Dr Manveen Gill", "hospital", lat=19.10, lon=72.87),
+           _osm("node", 6, "Nutan Mammography and Sonography Centre", "hospital", lat=19.10, lon=72.88),
+           _osm("node", 7, None, "hospital", lat=19.10, lon=72.89)]
+    names = [r["name"] for r in overpass.parse({"elements": els})]
+    assert names == ["Nanavati Hospital", "Mukund Maternity and Surgical Nursing Home",
+                     "Vatsal Nicu and Childrens Hospital"]
+
+
+def test_overpass_reads_relations_and_kindergartens():
+    els = [_osm("relation", 9, "Holy Family High School", "school"),
+           _osm("node", 10, "Little Feet Kindergarten", "kindergarten", lat=19.12)]
+    recs = overpass.parse({"elements": els})
+    assert [(r["id"], r["kind"]) for r in recs] == [("osm-relation-9", "school"), ("osm-node-10", "school")]
+
+
+def test_overpass_merges_a_school_mapped_twice():
+    els = [_osm("way", 20, "Shivaji School", "school", lat=19.1100, lon=72.8600),
+           _osm("node", 21, "Shivaji School", "school", lat=19.1103, lon=72.8602),
+           _osm("node", 22, "Shivaji School", "school", lat=19.1300, lon=72.8800)]  # same name, 2.8 km away
+    assert [r["id"] for r in overpass.parse({"elements": els})] == ["osm-way-20", "osm-node-22"]
+
+
+def test_overpass_falls_back_to_a_mirror():
+    seen = []
+
+    def reply(req):
+        seen.append(req.url.host)
+        if req.url.host == "overpass-api.de":
+            raise httpx.ConnectError("reset")
+        return httpx.Response(200, json={"elements": [_osm("node", 1, "Test School", "school")]})
+
+    client = httpx.Client(transport=httpx.MockTransport(reply))
+    recs = overpass.fetch([72.8, 19.0, 72.9, 19.1], client=client, sleep=lambda s: None)
+    assert recs[0]["name"] == "Test School"
+    assert seen[0] == "overpass-api.de" and seen[-1] != "overpass-api.de"
+
+
+def test_receptor_search_area_extends_past_the_ward():
+    min_lon, min_lat, max_lon, max_lat = pipeline.receptor_bbox([72.835, 19.09, 72.91, 19.14])
+    assert min_lon < 72.835 and min_lat < 19.09 and max_lon > 72.91 and max_lat > 19.14
+
+
 def test_http_get_retries_server_errors_and_rate_limits():
     replies = iter([httpx.Response(500), httpx.Response(429, headers={"x-ratelimit-reset": "7"}),
                     httpx.Response(200, json={"ok": True})])
