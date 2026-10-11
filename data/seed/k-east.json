@@ -1,0 +1,179 @@
+{
+  "_note": "Seed data for milestone 1. Stations are approximate placeholders until OpenAQ discovery replaces them with real station ids. Sites and receptors are DEMO entries for the prototype; run `dusttrace osm` online to load real schools and hospitals.",
+  "ward": {
+    "id": "K-East",
+    "name": "K-East (Andheri East)",
+    "center_lat": 19.1136,
+    "center_lon": 72.8697,
+    "bbox": [
+      72.835,
+      19.09,
+      72.91,
+      19.14
+    ]
+  },
+  "stations": [
+    {
+      "id": "seed-chakala",
+      "name": "Chakala, Andheri East (approx.)",
+      "lat": 19.1102,
+      "lon": 72.8622
+    },
+    {
+      "id": "seed-vileparle",
+      "name": "Vile Parle West (approx.)",
+      "lat": 19.1015,
+      "lon": 72.8371
+    },
+    {
+      "id": "seed-powai",
+      "name": "Powai (approx.)",
+      "lat": 19.1179,
+      "lon": 72.906
+    }
+  ],
+  "sites": [
+    {
+      "id": "A",
+      "name": "Metro Line 7A excavation",
+      "activity": "excavation",
+      "developer": "MMRDA contractor (demo)",
+      "lat": 19.117,
+      "lon": 72.856,
+      "area_m2": 8000,
+      "sensor_status": "trusted"
+    },
+    {
+      "id": "B",
+      "name": "Tower demolition, Chakala",
+      "activity": "demolition",
+      "developer": "Demo developer B",
+      "lat": 19.1115,
+      "lon": 72.865,
+      "area_m2": 6000,
+      "sensor_status": "trusted"
+    },
+    {
+      "id": "C",
+      "name": "Redevelopment, Marol",
+      "activity": "structure",
+      "developer": "Demo developer C",
+      "lat": 19.119,
+      "lon": 72.883,
+      "area_m2": 7000,
+      "sensor_status": "untrusted"
+    },
+    {
+      "id": "D",
+      "name": "Debris yard (unregistered)",
+      "activity": "debris",
+      "developer": "Unknown",
+      "lat": 19.1255,
+      "lon": 72.875,
+      "area_m2": 4000,
+      "sensor_status": "none"
+    },
+    {
+      "id": "E",
+      "name": "Housing tower, Saki Naka",
+      "activity": "structure",
+      "developer": "Demo developer E",
+      "lat": 19.1035,
+      "lon": 72.888,
+      "area_m2": 9000,
+      "sensor_status": "trusted"
+    },
+    {
+      "id": "F",
+      "name": "Road widening, Sahar Rd",
+      "activity": "excavation",
+      "developer": "BMC Roads (demo)",
+      "lat": 19.1,
+      "lon": 72.862,
+      "area_m2": 5000,
+      "sensor_status": "trusted"
+    }
+  ],
+  "receptors": [
+    {
+      "id": "r-school-1",
+      "name": "School near Chakala (demo)",
+      "kind": "school",
+      "lat": 19.1125,
+      "lon": 72.872,
+      "population": 1200
+    },
+    {
+      "id": "r-school-2",
+      "name": "Municipal school, Marol (demo)",
+      "kind": "school",
+      "lat": 19.115,
+      "lon": 72.8895,
+      "population": 900
+    },
+    {
+      "id": "r-school-3",
+      "name": "School near Sahar Rd (demo)",
+      "kind": "school",
+      "lat": 19.0985,
+      "lon": 72.8705,
+      "population": 800
+    },
+    {
+      "id": "r-hosp-1",
+      "name": "Hospital, Andheri East (demo)",
+      "kind": "hospital",
+      "lat": 19.1185,
+      "lon": 72.8645,
+      "population": 600
+    },
+    {
+      "id": "r-house-1",
+      "name": "Housing society, Chakala (demo)",
+      "kind": "housing",
+      "lat": 19.1095,
+      "lon": 72.869,
+      "population": 1500
+    },
+    {
+      "id": "r-house-2",
+      "name": "Housing society, Marol (demo)",
+      "kind": "housing",
+      "lat": 19.122,
+      "lon": 72.886,
+      "population": 1800
+    },
+    {
+      "id": "r-house-3",
+      "name": "Housing society, Saki Naka (demo)",
+      "kind": "housing",
+      "lat": 19.106,
+      "lon": 72.893,
+      "population": 2000
+    },
+    {
+      "id": "r-school-4",
+      "name": "School west of Metro 7A (demo)",
+      "kind": "school",
+      "lat": 19.1157,
+      "lon": 72.8515,
+      "population": 1100
+    },
+    {
+      "id": "r-house-4",
+      "name": "Housing society, west Chakala (demo)",
+      "kind": "housing",
+      "lat": 19.11,
+      "lon": 72.86,
+      "population": 1700
+    },
+    {
+      "id": "r-school-5",
+      "name": "School west of Marol site (demo)",
+      "kind": "school",
+      "lat": 19.1178,
+      "lon": 72.8785,
+      "population": 950
+    }
+  ]
+}

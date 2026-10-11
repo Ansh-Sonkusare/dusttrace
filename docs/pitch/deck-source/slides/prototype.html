@@ -1,0 +1,25 @@
+<section id="prototype" data-transition="fade" style="background:radial-gradient(circle at 100% 0%, #2A2116 0%, #0B0B0C 44%); color:#F2F2F2; font-family:'Manrope', Arial, sans-serif; padding:128px 128px 160px; display:flex; flex-direction:column; gap:40px">
+<div style="position:absolute; left:0px; top:0px; width:6px; height:1080px; background:linear-gradient(180deg, #E0A245 0%, #8C5A16 100%)"></div>
+<p style="position:absolute; left:128px; top:56px; width:400px; font-family:'Manrope', Arial, sans-serif; font-size:24px; font-weight:700; color:#F2F2F2">Dust<span style="color:#E0A245">Trace</span></p>
+<p style="position:absolute; right:128px; top:56px; width:240px; text-align:right; font-size:24px; font-weight:600; color:#8E8E94">16 / 20</p>
+<div style="display:flex; flex-direction:column; gap:16px">
+<div style="width:64px; height:6px; background:#D98E2B; border-radius:3px"></div>
+<p style="font-size:24px; font-weight:600; color:#E0A245">Round 2 prototype</p>
+<h2 style="font-family:'Manrope', Arial, sans-serif; font-size:64px; font-weight:600; line-height:1.1; color:#F2F2F2">Two pilot wards, real data, measured results</h2>
+</div>
+<p style="font-size:28px; line-height:1.4; color:#B6B6BC">Pilot wards: <b>K-East</b> (Andheri East) and <b>P-North</b> (Malad), both BMC-flagged dust hotspots.</p>
+<table style="font-family:'Manrope', Arial, sans-serif; font-size:24px; color:#F2F2F2; background:#141416; border:1px solid #2A2A2E; border-radius:16px; box-shadow:0px 8px 24px rgba(0,0,0,0.45)">
+<tr style="background:#1A1814"><th style="width:28%; color:#F2F2F2">Component</th><th style="width:17%; color:#F2F2F2">Status</th><th style="width:55%; color:#F2F2F2">How</th></tr>
+<tr><td>Spike forecast + exposure map</td><td>Real data</td><td>2022–26 station + weather history; OSM schools, hospitals</td></tr>
+<tr><td><b>Safe-Work Windows</b></td><td>Real data</td><td>Hourly Go / Caution / Avoid for ~40 sites, real wind</td></tr>
+<tr><td>Site discovery</td><td>Real data</td><td>Sentinel-2 change detection + citizen photo classifier</td></tr>
+<tr><td><b>Sensor Audit + Dust Score</b></td><td>Simulated feed</td><td>~50 synthetic sensors with injected faults</td></tr>
+<tr><td><b>DustTrace Nodes</b></td><td>Built</td><td>2–3 ESP32 + PMS5003 nodes, co-located with a CPCB station</td></tr>
+<tr><td>Control-room dashboard + apps</td><td>Built</td><td>Next.js: alerts, map, ranked list, windows, QR reports</td></tr>
+</table>
+<p style="font-size:28px; line-height:1.4; color:#F2F2F2"><b>Demo:</b> replay a real past spike day and show what DustTrace would have forecast, rescheduled and flagged.</p>
+<aside>[7:30 · 25 s]
+For Round 2 we'll build two pilot wards end to end: K-East, Andheri East with its Metro works, and P-North, Malad. Both were flagged as dust hotspots in BMC's November drive.
+The forecast, Safe-Work Windows and site discovery all run on real data. Only the sensor feed is simulated, clearly labelled, with faults we inject so we can measure the Audit honestly.
+Our demo replays a real past spike day and shows what DustTrace would have forecast, rescheduled and flagged. We'll also build two or three DustTrace Nodes and calibrate them next to a CPCB station, so the demo includes our own live sensor.</aside>
+</section>

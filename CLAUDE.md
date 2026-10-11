@@ -1,0 +1,24 @@
+# DustTrace: notes for Claude
+
+Start with `HANDOFF.md` (context, status, next steps) and `docs/design-system.md` (every visual decision).
+
+## Layout
+- `services/engine`: Python package `dusttrace` (ingest, LightGBM forecast, Gaussian plume, Safe-Work Windows). CLI: `python -m dusttrace <cmd>`.
+- `apps/web`: Next.js 16 App Router console (React 19, TypeScript 5, `pg`, MapLibre). Server components query Postgres directly in `lib/queries.ts`.
+- `supabase/migrations`: SQL schema (Postgres 16 + PostGIS). Add new numbered files; never edit applied ones.
+- `data/seed/k-east.json`: ward, seed stations, demo sites and receptors (approximate positions, `demo: true`).
+- `docs/`: PRD, pitch deck (PDF, PPTX, HTML source), prototype, video kit, screenshots.
+
+## Commands
+- Engine tests: `cd services/engine && pytest -q`
+- Full local run: `python -m dusttrace all` (needs `DATABASE_URL`; default `postgresql://postgres@localhost:5432/dusttrace`)
+- Web: `cd apps/web && npm run typecheck && npm run build`; dev server `npm run dev`
+- `predev`/`prebuild` copy the MapLibre worker into `public/maplibre/` (MapLibre can't find its worker under the Next bundler). Don't remove it.
+
+## Conventions
+- Times are stored in UTC and shown in IST (`lib/format.ts`). Write `µg/m³`.
+- Any synthetic or demo data must stay visibly labelled (`synthetic` columns, `data_mode`, `demo` flags, the console banner).
+- UI copy is sentence case and plain-spoken, with no all-caps labels. The accent is amber `#E0A245`; status colours are reserved; never blue.
+- Pages use `export const dynamic = "force-dynamic"` and show an empty state when no run exists.
+- Keep `globals.css` tokens and `docs/design-system.md` in sync.
+- Team credit is "Team ARA IGNITE: Ansh, Dhruv, Anuj, Sarang". No institution name.

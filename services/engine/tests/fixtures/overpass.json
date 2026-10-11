@@ -1,0 +1,4 @@
+{"elements":[
+ {"type":"node","id":1,"lat":19.11,"lon":72.86,"tags":{"amenity":"school","name":"Test School"}},
+ {"type":"way","id":2,"center":{"lat":19.12,"lon":72.87},"tags":{"amenity":"hospital"}},
+ {"type":"node","id":3,"lat":19.1,"lon":72.8,"tags":{"amenity":"cafe"}}]}

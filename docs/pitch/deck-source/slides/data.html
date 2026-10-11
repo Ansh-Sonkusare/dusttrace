@@ -1,0 +1,25 @@
+<section id="data" data-transition="fade" style="background:radial-gradient(circle at 100% 0%, #2A2116 0%, #0B0B0C 44%); color:#F2F2F2; font-family:'Manrope', Arial, sans-serif; padding:128px 128px 160px; display:flex; flex-direction:column; gap:48px">
+<div style="position:absolute; left:0px; top:0px; width:6px; height:1080px; background:linear-gradient(180deg, #E0A245 0%, #8C5A16 100%)"></div>
+<p style="position:absolute; left:128px; top:56px; width:400px; font-family:'Manrope', Arial, sans-serif; font-size:24px; font-weight:700; color:#F2F2F2">Dust<span style="color:#E0A245">Trace</span></p>
+<p style="position:absolute; right:128px; top:56px; width:240px; text-align:right; font-size:24px; font-weight:600; color:#8E8E94">A2</p>
+<div style="display:flex; flex-direction:column; gap:16px">
+<div style="width:64px; height:6px; background:#D98E2B; border-radius:3px"></div>
+<p style="font-size:24px; font-weight:600; color:#E0A245">Appendix · Data sources</p>
+<h2 style="font-family:'Manrope', Arial, sans-serif; font-size:64px; font-weight:600; line-height:1.1; color:#F2F2F2">Built entirely on free, existing data</h2>
+</div>
+<table style="font-family:'Manrope', Arial, sans-serif; font-size:28px; color:#F2F2F2; background:#141416; border:1px solid #2A2A2E; border-radius:16px; box-shadow:0px 8px 24px rgba(0,0,0,0.45)">
+<tr style="background:#1A1814"><th style="width:38%; color:#F2F2F2">Data</th><th style="width:34%; color:#F2F2F2">Source</th><th style="width:28%; color:#F2F2F2">Access</th></tr>
+<tr><td>PM10 / PM2.5 at 21+ Mumbai stations</td><td>CPCB CAAQMS via OpenAQ API</td><td>Free API key</td></tr>
+<tr><td>Wind, humidity, rain, boundary layer</td><td>Open-Meteo</td><td>Free, no key</td></tr>
+<tr><td>10 m satellite imagery, ~5-day revisit</td><td>Sentinel-2 via Earth Engine</td><td>Free, noncommercial</td></tr>
+<tr><td>Registered construction projects</td><td>MahaRERA public registry</td><td>Public</td></tr>
+<tr><td>Ward boundaries</td><td>DataMeet spatial data</td><td>Open licence</td></tr>
+<tr><td>Site-sensor feed (30 s PM, humidity)</td><td>BMC Command &amp; Control Centre</td><td>Simulated now; RTI + vendor data planned</td></tr>
+<tr><td>Citizen photos</td><td>DustTrace app</td><td>Crowdsourced</td></tr>
+</table>
+<p style="font-size:32px; line-height:1.4; color:#F2F2F2"><b>₹0 in data costs.</b> The one feed we lack is simulated from real station data.</p>
+<aside>[Backup · show if asked about data access]
+Is this feasible? Every input is free and public. OpenAQ gives us history for 21-plus CPCB stations in Mumbai. Open-Meteo gives wind and weather. Sentinel-2 gives 10-metre imagery every five days. MahaRERA lists every registered project.
+The one feed we can't access yet is BMC's site-sensor data, so we simulate it from real station data, and we're pursuing an RTI and vendor samples to validate it.
+Total data cost: zero.</aside>
+</section>

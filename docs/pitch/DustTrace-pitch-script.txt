@@ -1,0 +1,528 @@
+============================================================================
+                                 DUSTTRACE                                  
+                            Round 1 pitch script                            
+
+                 Team ARA IGNITE: Ansh, Dhruv, Anuj, Sarang                 
+        Techfest IIT Bombay, InnovateX 2026–27, Theme 2: Rising AQI         
+============================================================================
+
+HOW TO USE THIS
+
+Slides 1–16 are the pitch, about 8 minutes 10 seconds, which leaves room
+inside the 10 minutes. Read each slide's script aloud; the times show where
+you should be. "Backup facts" are for questions only, not to be read in the
+pitch. Slides A1–A7 are backup slides to pull up if a judge asks.
+
+RUN SHEET
+
+ #   Start   Length  Slide
+ --  -----   ------  ---------------------------------------------
+ 01   0:00     20 s  DustTrace
+ 02   0:20     30 s  Rising AQI in modern urban cities
+ 03   0:50     35 s  Construction dust is Mumbai's leading air-po…
+ 04   1:25     30 s  Four gaps between the sensors and enforcement
+ 05   1:55     25 s  Stop the dust before it reaches people.
+ 06   2:20     40 s  DustTrace on one Mumbai street
+ 07   3:00     35 s  DustTrace Nodes: fixed and on BEST buses
+ 08   3:35     35 s  Safe-Work Windows: when dusty work is safe
+ 09   4:10     40 s  Fix the cause, then capture the dust
+ 10   4:50     35 s  Every trigger becomes a verified fix
+ 11   5:25     30 s  A Dust Score on every site's LED board
+ 12   5:55     35 s  The ward officer’s morning, on one screen
+ 13   6:30     20 s  The site gets a plan, not just a fine
+ 14   6:50     30 s  Costs less than sensoring the blind spots
+ 15   7:20     25 s  Proof, not promises
+ 16   7:45     25 s  Mumbai already paid for the sensors. DustTra…
+                     End at about 8:10, then questions
+
+
+============================================================================
+                                 THE PITCH                                  
+============================================================================
+
+SLIDE 01  ·  0:00–0:20  ·  20 seconds
+DUSTTRACE
+----------------------------------------------------------------------------
+
+Good morning. We're team ARA IGNITE, Ansh, Dhruv, Anuj and Sarang, and this
+is DustTrace, our entry for Theme 2, Rising AQI.
+
+In one line: we stop construction dust before it reaches people. We forecast
+spikes 48 hours ahead, move dusty work to safer hours, and tell the BMC
+exactly which sites to inspect.
+
+We build on the sensors Mumbai already has, and add our own low-cost sensors
+only where there are none.
+
+
+SLIDE 02  ·  0:20–0:50  ·  30 seconds
+RISING AQI IN MODERN URBAN CITIES
+----------------------------------------------------------------------------
+
+Our theme is Rising AQI in modern cities. The brief asks how technology can
+monitor, predict and reduce rising AQI, and it asks for one thing
+specifically: address a specific pollution source.
+
+Mumbai's air has many sources: vehicles, industry, road dust, burning,
+construction. We chose construction dust, and our solution monitors it,
+predicts it and reduces it. Here's why we chose it.
+
+
+SLIDE 03  ·  0:50–1:25  ·  35 seconds
+CONSTRUCTION DUST IS MUMBAI'S LEADING AIR-POLLUTION SOURCE
+----------------------------------------------------------------------------
+
+Construction dust is Mumbai's leading air-pollution source. That's not our
+claim; it's from BMC's own Air Pollution Mitigation Plan.
+
+The city has about twelve hundred active construction sites. After a High
+Court order, every one of them has to run an air-quality sensor. But by
+October 2025, only 45 percent had one.
+
+In November, a 95-ward inspection found 117 sensors switched off or
+inactive, and BMC issued 62 stop-work notices in a single drive.
+
+Since June 2025, every one of those sensors has to stream to BMC every
+thirty seconds. So Mumbai has the IoT. What it can't do is trust it, see
+past it, or use it to prevent a spike.
+
+  Backup facts (for questions, don't read aloud):
+
+    If a judge asks about the share of construction: estimates vary by
+    method. SAFAR (2022) put construction at about 8% of city particulate
+    matter, with Metro works alone at 3.2% of suspended dust; NEERI found
+    construction plus natural dust at 27% of PM10 at Dharavi. Hyperlocally,
+    near active sites, it dominates.
+
+    Before the zonal: check whether BMC has published newer 2026 compliance
+    figures.
+
+
+SLIDE 04  ·  1:25–1:55  ·  30 seconds
+FOUR GAPS BETWEEN THE SENSORS AND ENFORCEMENT
+----------------------------------------------------------------------------
+
+So where does it break? Four gaps.
+
+One: untrusted data. The sensor is owned, placed and maintained by the very
+developer it's supposed to monitor.
+
+Two: blind spots. The homes and schools around sites have no sensor at all,
+and unregistered demolitions never will.
+
+Three, and most important: nothing prevents. Sprinklers and inspections
+start after the air turns bad, and no one tells a site when not to demolish.
+
+Four: no attribution. A monitoring station reads a whole neighbourhood. It
+can't tell you which of dozens of sites upwind caused the spike.
+
+
+SLIDE 05  ·  1:55–2:20  ·  25 seconds
+STOP THE DUST BEFORE IT REACHES PEOPLE.
+----------------------------------------------------------------------------
+
+So here's our idea. Every tool in Mumbai today asks one question: who
+polluted? And it asks it after the air has already turned bad.
+
+We flip it. DustTrace asks: when and where will dust hit people tomorrow,
+and what can we change on site today to stop it?
+
+That gives us three layers: Predict, Prevent, Prove. Prevent is the part
+nobody does today, and it's where our two unique elements live.
+
+
+SLIDE 06  ·  2:20–3:00  ·  40 seconds
+DUSTTRACE ON ONE MUMBAI STREET
+----------------------------------------------------------------------------
+
+Here's DustTrace on one Mumbai street.
+
+One: the forecast, built from CPCB stations and weather, flags tomorrow's
+spike.
+
+Two: our plume model follows the wind from the site and finds who's
+downwind, here a school, and our own sensor node at the school measures what
+the children actually breathe.
+
+Three, our first unique element: the site gets its Safe-Work Window, so
+demolition moves to the afternoon and the mist cannon starts before the
+spike.
+
+Four: the site's own sensor is checked against the station and its
+neighbours, and the satellite finds the site next door that has no sensor.
+
+Five, our second unique element. Every site already has to show an LED board
+with its live dust readings. We add two things to it: a Dust Score out of
+100 that tells passers-by how well this site controls its dust, and a QR
+code. A resident who sees dust scans it, snaps a photo, and the report goes
+straight to that site's record. Those reports and scores feed the officer's
+ranked inspection list for the next morning.
+
+Most of this runs on hardware Mumbai already has: the board, the site sensor
+and the stations. Where there is no sensor at all, we add our own low-cost
+nodes, which is next.
+
+
+SLIDE 07  ·  3:00–3:35  ·  35 seconds
+DUSTTRACE NODES: FIXED AND ON BEST BUSES
+----------------------------------------------------------------------------
+
+Where Mumbai has no sensors, we add our own. A DustTrace Node is an ESP32
+board, a laser dust sensor and a humidity sensor in a weatherproof box. It
+costs about 2,700 rupees, against one to two lakh for a site monitor.
+
+Fixed nodes go where people live and breathe: housing societies next to
+sites, schools and hospitals downwind. And the same node, with GPS, rides on
+BEST buses. Mumbai runs 2,792 of them, 1,324 electric, and they pass
+construction sites every day, so we get readings at sites with no sensor,
+and a check on sites whose own sensor says everything is fine.
+
+They measure real exposure. They prove whether a Safe-Work Window actually
+cut the dust at the school. And they give every developer's sensor an
+independent neighbour to be checked against. We calibrate them against CPCB
+stations, and the official site monitors stay the compliance record.
+
+
+SLIDE 08  ·  3:35–4:10  ·  35 seconds
+SAFE-WORK WINDOWS: WHEN DUSTY WORK IS SAFE
+----------------------------------------------------------------------------
+
+Our first unique element: Safe-Work Windows.
+
+The same demolition does very different harm depending on when it happens.
+On a winter morning, the air near the ground is shallow and still, and if
+the wind is blowing toward a school, that dust lands on children. By
+afternoon, the sea breeze and a deeper mixing layer spread it out.
+
+So for every site, for every hour of the next two days, we combine the wind
+forecast, mixing height, rain and who is downwind, and output Go, Caution or
+Avoid for the dustiest tasks.
+
+The site does the same work, just at a better hour. No new equipment, no
+work lost. This example is illustrative. In Round 2 we compute it on real
+wind data for about forty sites and measure how much exposure it avoids.
+
+  Backup facts (for questions, don't read aloud):
+
+    Inputs are Open-Meteo forecasts (wind, boundary-layer height, rain) and
+    OpenStreetMap schools and hospitals plus ward population. Dispersion
+    uses a simple Gaussian plume approximation.
+
+
+SLIDE 09  ·  4:10–4:50  ·  40 seconds
+FIX THE CAUSE, THEN CAPTURE THE DUST
+----------------------------------------------------------------------------
+
+Rescheduling is only one lever. DustTrace also finds the cause and sends the
+fix. A work-hour spike of coarse dust, where PM10 jumps far more than PM2.5,
+points to dry excavation, so the site is told to spray water or shift to its
+safe window. Spikes at the gate at truck times point to track-out: wheel
+wash and covered loads. Satellite and photos catch uncovered debris. And a
+dry, windy forecast means pre-wet the site.
+
+We also don't just divert dust; we capture and clean it. A mist curtain
+along the boundary switches on from the forecast, green screens on the
+hoardings trap coarse dust, and when a school is downwind, it's alerted to
+close windows and run classroom purifiers.
+
+
+SLIDE 10  ·  4:50–5:25  ·  35 seconds
+EVERY TRIGGER BECOMES A VERIFIED FIX
+----------------------------------------------------------------------------
+
+So who decides what happens? Our Dust Response Agent. It's built the same
+way as the fraud-investigation agent one of us built for TigerGraph's Hacker
+House in Goa.
+
+Every trigger, whether a forecast, a sensor spike, a node reading, a QR
+report or a satellite find, becomes a case. The agent gathers evidence,
+weighs competing causes, and picks actions under written dust rules, each
+with an approval route: automatic, site manager, ward officer or Assistant
+Commissioner.
+
+Two rules matter most for fairness: no enforcement on a single signal, and
+stop-work is only ever a recommendation a human signs. And the last step is
+new: it checks whether the dust actually fell. If not, the case stays open.
+
+
+SLIDE 11  ·  5:25–5:55  ·  30 seconds
+A DUST SCORE ON EVERY SITE'S LED BOARD
+----------------------------------------------------------------------------
+
+Our second unique element uses something every site already has: the LED
+board the High Court made compulsory.
+
+Next to the PM readings, we show a Dust Score out of 100. It combines how
+trustworthy the site's sensor is, how often spikes trace back to it, whether
+it followed its Safe-Work Windows, verified citizen reports, and inspection
+history.
+
+There's a QR code on the board. A resident scans it and reports dust in
+thirty seconds, already tagged to that exact site.
+
+And the score has consequences. We propose that high scorers earn fewer
+routine inspections and low scorers go to the top of the list. That rewards
+compliance instead of only punishing violations. The weights and incentives
+are proposals to design with BMC.
+
+
+SLIDE 12  ·  5:55–6:30  ·  35 seconds
+THE WARD OFFICER’S MORNING, ON ONE SCREEN
+----------------------------------------------------------------------------
+
+This is our working web prototype, not a mock-up. It's what a BMC ward
+officer in K-East opens at 8:40 in the morning.
+
+One: a briefing in plain words. A 78 percent chance PM10 crosses 100
+tomorrow morning, six sites in Avoid windows, seven sensors we don't trust.
+
+Two: the dust weather map. Each orange shape is a forecast plume from a
+construction site, drifting with the wind over the school and the hospital.
+
+Three: press play and you watch tomorrow happen, hour by hour, as plumes
+grow and sites switch between Go and Avoid.
+
+Four: the Needs you queue. Every alert comes with the fix as a button: turn
+on the mist at Site B, tell Site A's manager they're demolishing in the
+wrong window, send a flat sensor to inspection, warn the school.
+
+Five: green diamonds are our own nodes, and the teal markers are BEST buses
+carrying sensors past the sites.
+
+
+SLIDE 13  ·  6:30–6:50  ·  20 seconds
+THE SITE GETS A PLAN, NOT JUST A FINE
+----------------------------------------------------------------------------
+
+And this is what the contractor sees. At six in the evening, a plan, not a
+penalty: tomorrow morning is an Avoid window, move excavation to the
+afternoon. One tap to accept. If we need evidence, like a gate photo, it
+comes with a deadline, and if nothing arrives, the agent adds an inspection.
+Following the plan raises their Dust Score, which their neighbours can see.
+
+
+SLIDE 14  ·  6:50–7:20  ·  30 seconds
+COSTS LESS THAN SENSORING THE BLIND SPOTS
+----------------------------------------------------------------------------
+
+Now the money. Developers are already paying one to two lakh rupees per
+sensor. Across twelve hundred sites, that's twelve to twenty-four crore of
+hardware the city isn't using well.
+
+Running DustTrace city-wide costs an estimated fifty to sixty lakh a year,
+plus about five lakh once for two hundred of our own nodes. Compare that
+with five to ten crore just to put sensors on the five hundred unsensored
+sites, which still wouldn't audit or forecast anything.
+
+And the funding already exists: Greater Mumbai has received over 938 crore
+in NCAP air-quality grants.
+
+We'd sell per-ward licences to BMC and data access to MPCB. Developers pay
+for Safe-Work Windows and a verified Dust Score, because following a window
+costs nothing and a stop-work notice halts the whole site.
+
+  Backup facts (for questions, don't read aloud):
+
+    Developers are already paying ₹1–2 lakh per sensor, roughly ₹12–24 crore
+    across ~1,200 sites if all comply. That hardware is under-used. Our
+    running cost is an estimated ₹50–60 lakh a year city-wide, with no
+    capex, versus ₹5–10 crore just to put sensors on the ~500 unsensored
+    sites, which still wouldn't audit or forecast anything. Funding exists:
+    Greater Mumbai received ₹938.59 crore in NCAP / Finance Commission air-
+    quality grants through FY24. Revenue: a per-ward licence to BMC, a paid
+    early-warning tier for developers, and data licences. All prices are our
+    assumptions to validate.
+
+
+SLIDE 15  ·  7:20–7:45  ·  25 seconds
+PROOF, NOT PROMISES
+----------------------------------------------------------------------------
+
+We don't want to claim impact; we want to measure it, and the product is
+built to do that. This screen shows the pilot view on simulated data: K-East
+against two control wards, and every case closes only on a measured drop.
+These are our pilot targets: at least double the violations found per
+inspection, 80 percent precision on flagged sensors, 70 percent recall on
+unsensored sites, a forecast that beats persistence, twenty percent fewer
+people downwind during dusty work, and a 10 percent PM10 drop on high-risk
+days compared with control wards.
+
+We'll measure it with a proper difference-in-differences design over one
+winter. The people who benefit first are residents next to sites, and the
+construction workers who breathe this dust all day.
+
+
+SLIDE 16  ·  7:45–8:10  ·  25 seconds, then Q&A
+MUMBAI ALREADY PAID FOR THE SENSORS. DUSTTRACE TURNS THEM INTO PREVENTION.
+----------------------------------------------------------------------------
+
+So here's where we land. Mumbai already paid for the sensors. DustTrace
+turns them into prevention.
+
+In Round 2 we'll show you three things: a real past spike and whether we
+forecast it 48 hours ahead; Safe-Work Windows and how much exposure they
+avoid, on real wind data; and faulty sensors and hidden sites, caught.
+
+Thank you. We'd love your questions.
+
+  Prepared answers for questions:
+
+    Q: Why only dust, when the theme is AQI?
+    A: The brief asks for a specific pollution source, so we went deep on
+    Mumbai's biggest one. It's also the only source with a court-mandated
+    sensor network, and the only one where the timing of emissions can be
+    moved. The engines extend to any source that stays in one place: RMC
+    plants, bakeries, waste burning, road dust (appendix A6).
+
+    Q: Why would developers follow Safe-Work Windows?
+    A: Following one costs nothing; it raises their Dust Score and lowers
+    their chance of a stop-work notice. BMC could also make it a condition
+    of approval.
+
+    Q: Can you really switch on sprinklers?
+    A: Some BMC-approved monitors, such as Oizom AQBot, already have relay
+    outputs for sprinklers and mist cannons. Sites without relays get the
+    alert on WhatsApp instead.
+
+    Q: Where's the IoT?
+    A: The BMC site-sensor network and CAAQMS stations (appendix slide A1;
+    architecture A3, models A4); plus our own DustTrace Nodes at schools,
+    housing societies and unsensored areas (slide 7).
+
+    Q: Why not smog towers, or filters on buses?
+    A: The evidence says they barely move city air. Delhi's pollution
+    committee told the NGT its smog towers were ineffective: IIT Bombay
+    measured about 50% cleaner air within 20 m but only 12 to 13% at 100 to
+    200 m, at Rs 25 crore to build and Rs 15 lakh a month to run each tower.
+    A roof filter on a UK bus removed 65 g of particulates in 100 days; even
+    2,500 such buses would remove about 588 kg of PM10 a year, against
+    Mumbai's roughly 87,000 tonnes. So we put sensors on buses, not filters,
+    and capture dust at the source with mist curtains.
+
+    Q: Isn't this just diverting dust?
+    A: No. We fix the cause at the site, capture dust with forecast-
+    triggered mist curtains and green screens, and protect people indoors at
+    downwind schools (slide 9).
+
+    Q: How do you get BMC data?
+    A: It's simulated for now; we've requested an RTI and vendor samples,
+    and there's an MoU path. The product still works on public data without
+    it (appendix A2).
+
+    Q: How is this different from BMC's dashboard?
+    A: See appendix A5: their dashboard shows readings; we add prevention,
+    trust checks, discovery and ranking.
+
+    Q: Is construction really the main source?
+    A: BMC's plan ranks it first. Estimates vary by study: SAFAR puts it at
+    about 8% city-wide, and NEERI found construction plus natural dust at
+    27% at Dharavi. Near active sites it dominates, and that's where we act.
+
+============================================================================
+                       BACKUP SLIDES (only if asked)                        
+============================================================================
+
+A1  ·  Mumbai made site sensors compulsory in 2025
+     When: Show if asked "where's the IoT?"
+
+     Here's what most people don't know: Mumbai already has an IoT network
+     for this problem.
+
+     In 2023, BMC issued dust guidelines and the High Court stepped in. In
+     January 2025, the court ordered site-level monitoring instead of
+     blanket ward bans.
+
+     Since June 2025, every active site must install a BMC-approved PM2.5
+     and PM10 sensor, with an LED board at the gate, reporting every 30
+     seconds to BMC's Command and Control Centre.
+
+     By November, 662 were installed. But only about 400 actually reached
+     the dashboard.
+
+     So when someone asks "where's the IoT?", this is it. The hardware
+     exists. The intelligence on top of it doesn't.
+
+
+A2  ·  Built entirely on free, existing data
+     When: Show if asked about data access
+
+     Is this feasible? Every input is free and public. OpenAQ gives us
+     history for 21-plus CPCB stations in Mumbai. Open-Meteo gives wind and
+     weather. Sentinel-2 gives 10-metre imagery every five days. MahaRERA
+     lists every registered project.
+
+     The one feed we can't access yet is BMC's site-sensor data, so we
+     simulate it from real station data, and we're pursuing an RTI and
+     vendor samples to validate it.
+
+     Total data cost: zero.
+
+
+A3  ·  From data to action, for three audiences
+     When: Show if asked about architecture or tech stack
+
+     Under the hood: five inputs that already exist, three engines, and
+     three outputs, one for each audience. Sites get Safe-Work Windows and
+     misting triggers. Officers get the ranked list. The public gets the
+     Dust Score and the QR code. Inspection outcomes and citizen reports
+     flow back and retrain the models.
+
+
+A4  ·  Forecast the spike, then point at the sites
+     When: Show if asked about the models
+
+     Forecast asks one question: will PM10 cross the national 24-hour
+     standard of 100 micrograms in the next 24, 48 or 72 hours?
+
+     We train a gradient-boosted model per station on four years of real
+     data, and it has to beat two baselines: "tomorrow looks like today",
+     and SAFAR's own forecast.
+
+     Prioritise then scores every upwind site. On the right is what an
+     officer would see: three sites, each with its reasons. This panel is a
+     mock-up; the real one is what we build for Round 2.
+
+
+A5  ·  What no existing tool does together
+     When: If asked how we differ
+
+     How is this different from what exists? BMC's dashboard shows live site
+     readings and threshold alerts. SAFAR forecasts air quality at city
+     level. Vendor devices can switch on sprinklers, but only after a
+     threshold is crossed.
+
+     None of them checks whether a sensor can be trusted, finds sites with
+     no sensor, or tells a site when dusty work is safe. DustTrace does all
+     of that on top of their data, not instead of it.
+
+
+A6  ·  One source today, any fixed source next
+     When: Show if asked how this scales beyond Mumbai or beyond dust
+
+     It scales in two directions. Across cities: Mumbai and Delhi already
+     mandate site sensors, so they get the full product. Cities with
+     stations but no mandate still get Predict, Prevent and Discover. NCAP
+     covers 130 cities and has released over sixteen thousand crore, so
+     every city already has a funded buyer.
+
+     And beyond dust: the engines work for any source that stays in one
+     place. In Mumbai, the next ones are RMC plants, wood-fired bakeries
+     (only 209 of 593 were on clean fuel last November), open waste burning,
+     and road dust. We went deep on one source because the brief asked us
+     to, and we picked the biggest one.
+
+
+A7  ·  A case, decided and explained
+     When: Show if asked how the agent decides a case
+
+     Here's the agent at work. Case 142: tomorrow's forecast says dust will
+     reach St. Xavier's School from Site A. On the left, every step it took.
+     In the middle, its likely causes: dry excavation first. Then the plan.
+     Its first plan asked the site for a gate photo; no reply came by nine,
+     and it never assumes one, so the final plan adds an inspection. That
+     needs a ward officer's approval, and every action shows the rule behind
+     it.
+
+     On the right, what a resident sees after scanning the QR code: the
+     site's Dust Score, the air at their building from our node, and a
+     thirty-second report.

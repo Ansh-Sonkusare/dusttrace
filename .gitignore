@@ -1,0 +1,23 @@
+# deps and builds
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+dist/
+build/
+
+# env
+.env
+.env.local
+.env*.local
+
+# generated
+apps/web/public/maplibre/
+
+# OS
+.DS_Store

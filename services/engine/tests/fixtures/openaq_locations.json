@@ -1,0 +1,5 @@
+{"meta":{"found":2},"results":[
+ {"id":3409360,"name":"Chakala-Andheri East, Mumbai - IITM","coordinates":{"latitude":19.1103,"longitude":72.8623},
+  "provider":{"id":168,"name":"CPCB"},
+  "sensors":[{"id":11111,"parameter":{"id":1,"name":"pm10","units":"µg/m³"}},{"id":11112,"parameter":{"id":2,"name":"pm25","units":"µg/m³"}},{"id":11113,"parameter":{"id":7,"name":"no2","units":"µg/m³"}}]},
+ {"id":99,"name":"No PM here","coordinates":{"latitude":19.1,"longitude":72.85},"sensors":[{"id":5,"parameter":{"name":"o3"}}]}]}

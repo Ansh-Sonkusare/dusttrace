@@ -1,0 +1,54 @@
+name: Hourly forecast
+
+# Ingests the latest weather and station readings, then issues a new 48 h run.
+# Needs repository secrets:
+#   DATABASE_URL     Supabase pooler connection string (Settings > Database)
+#   OPENAQ_API_KEY   free key from https://explore.openaq.org/register
+# Disabled until DATABASE_URL is set, so forks and fresh clones don't fail every hour.
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days of history to (re)load"
+        default: "3"
+      mode:
+        description: "auto, live or synthetic"
+        default: "auto"
+
+concurrency:
+  group: forecast
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENAQ_API_KEY: ${{ secrets.OPENAQ_API_KEY }}
+    defaults:
+      run:
+        working-directory: services/engine
+    steps:
+      - name: Check secrets
+        id: gate
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "DATABASE_URL secret not set, skipping."; echo "ok=false" >> "$GITHUB_OUTPUT"; else echo "ok=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.ok == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.gate.outputs.ok == 'true'
+        run: pip install -e .
+      - name: Ingest
+        if: steps.gate.outputs.ok == 'true'
+        run: python -m dusttrace ingest --mode "${{ inputs.mode || 'auto' }}" --days "${{ inputs.days || '3' }}"
+      - name: Forecast, plumes, Safe-Work Windows
+        if: steps.gate.outputs.ok == 'true'
+        run: python -m dusttrace run

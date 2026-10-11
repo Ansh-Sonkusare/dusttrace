@@ -1,0 +1,696 @@
+<title>DustTrace Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap">
+<style>
+/* Palette: near-black monochrome with one dust-amber accent; no blue. Layout: civic operations console. Fixed nav rail on the left; each view is a dense grid sized to one 16:9 screen.
+   The one bold element is the "dust weather" map: forecast plume contours that move with a time scrubber. */
+:root{
+  --paper:#0B0B0C; --panel:#141416; --sunk:#1A1A1D; --line:#25252A; --line-2:#34343A;
+  --ink:#F2F2F2; --ink-2:#A3A3A8; --ink-3:#6F6F75;
+  --rail:#0B0B0C; --rail-ink:#F2F2F2; --rail-ink-2:#8A8A90; --rail-hi:#1C1C1F;
+  --act:#F2F2F2; --act-ink:#0B0B0C;
+  --dust:#E0A245; --dust-ink:#F0BE6E; --dust-tint:#2B2216;
+  --crit:#EB6E5B; --crit-tint:#2E1714; --ok:#6CC59A; --ok-tint:#14261C; --info:#86BDB9; --info-tint:#152322;
+  --map:#111113; --map-land:#17171A; --road:#29292E; --water:#1E2629; --runway:#2E2E33;
+  --c1:#1F1F22; --c2:#4A3F28; --c3:#8C6A33; --c4:#C98636; --c5:#C4552B; --c6:#F0533F;
+  --glass:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.012));
+  color-scheme:dark;
+  --f-ui:'Manrope', 'Segoe UI', Arial, sans-serif;
+  --f-num:'Manrope', 'Segoe UI', Arial, sans-serif;
+}
+/* Dark graphite is the default; light is an opt-in theme for print and daylight use. */
+:root[data-theme="light"]{
+  --paper:#F3F2EF; --panel:#FFFFFF; --sunk:#F8F7F5; --line:#E0DED9; --line-2:#CCC9C2;
+  --ink:#1C1D21; --ink-2:#4A4B50; --ink-3:#74757A;
+  --rail:#18191C; --rail-ink:#ECEAE6; --rail-ink-2:#8C8983; --rail-hi:#2A2B30;
+  --act:#1C1D21; --act-ink:#FFFFFF;
+  --dust:#C98118; --dust-ink:#8C560B; --dust-tint:#FBF0DC;
+  --crit:#C23B2A; --crit-tint:#FBE8E4; --ok:#2E7D5B; --ok-tint:#E3F1EA; --info:#2B7F80; --info-tint:#E2F1F0;
+  --map:#ECEBE7; --map-land:#E2E1DC; --road:#FFFFFF; --water:#BFD6DA; --runway:#CFCDC8;
+  --c1:#ECEBE4; --c2:#F2E1B2; --c3:#EBC077; --c4:#DE8F3B; --c5:#C4552B; --c6:#8B2A1A;
+  --glass:none; color-scheme:light;}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.45 var(--f-ui);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--dust);outline-offset:2px}
+.n{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.tab{font-variant-numeric:tabular-nums}
+
+.app{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100%}
+.rail{background:var(--rail);color:var(--rail-ink);display:flex;flex-direction:column;gap:4px;padding:18px 12px;position:sticky;top:0;height:100vh}
+.mark{display:flex;align-items:center;gap:10px;padding:4px 8px 18px}
+.mark svg{flex:none}
+.mark b{font:700 22px/1 var(--f-num);letter-spacing:.01em}
+.mark small{display:block;font-size:12px;color:var(--rail-ink-2);margin-top:3px}
+.nav{display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;color:var(--rail-ink-2);padding:9px 10px;border-radius:8px;text-align:left;font-weight:500}
+.nav svg{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8}
+.nav:hover{color:var(--rail-ink);background:var(--rail-hi)}
+.nav[aria-current="page"]{color:var(--rail-ink);background:var(--rail-hi);box-shadow:inset 3px 0 0 var(--dust)}
+.nav .count{margin-left:auto;font:600 12px var(--f-ui);background:var(--dust);color:#16171A;border-radius:99px;padding:1px 7px}
+.rail .grow{flex:1}
+.who{border-top:1px solid var(--rail-hi);padding:14px 8px 0;font-size:13px;color:var(--rail-ink-2)}
+.who b{display:block;color:var(--rail-ink);font-weight:600}
+
+.top{display:flex;align-items:center;gap:16px;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:4}
+.top select,.top input{border:1px solid var(--line);background:var(--sunk);border-radius:8px;padding:7px 10px}
+.top input{width:260px}
+.top .sp{flex:1}
+.live{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-tint)}
+.when{font-weight:600}
+.demo{font-size:12px;color:var(--ink-3);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+
+.view{padding:20px 24px 24px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.view[hidden]{display:none!important}
+h1{font:600 30px/1.1 var(--f-num);margin:0;letter-spacing:.005em}
+.lede{margin:4px 0 0;color:var(--ink-2);font-size:15px;max-width:80ch}
+.lede b{color:var(--ink)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-width:0}
+.ph{display:flex;align-items:center;gap:12px;padding:14px 16px 0}
+.ph h2{font:600 19px/1.2 var(--f-num);margin:0}
+.ph .meta{margin-left:auto;font-size:13px;color:var(--ink-3)}
+.muted{color:var(--ink-3)}
+
+/* stat strip */
+.stats{display:grid;grid-template-columns:1.4fr 1fr 1fr 1.2fr;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.stat{padding:12px 18px;display:flex;align-items:baseline;gap:12px;border-left:1px solid var(--line)}
+.stat:first-child{border-left:0}
+.stat .v{font:600 34px/1 var(--f-num)}
+.stat .d{color:var(--ink-2);font-size:13px;line-height:1.35}
+.stat.risk .v{color:var(--crit)}
+
+/* overview grid */
+.ov{display:grid;grid-template-columns:minmax(0,1fr) 410px;gap:16px;align-items:stretch}
+.side{display:flex;flex-direction:column;gap:16px;min-width:0;height:0;min-height:100%}
+.side .panel{display:flex;flex-direction:column;flex:1;min-height:0}
+.side .queue{flex:1;min-height:0;overflow-y:auto}
+#mapbox svg{max-height:445px}
+.mapbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 16px 4px}
+.play{width:34px;height:34px;border-radius:50%;border:1px solid var(--line-2);background:var(--panel);display:grid;place-items:center}
+.play svg{width:14px;height:14px;fill:var(--ink)}
+.scrub{flex:1;min-width:180px;display:flex;flex-direction:column;gap:2px}
+.scrub input{width:100%;accent-color:var(--dust)}
+.ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-3)}
+.hourlbl{font:600 22px/1 var(--f-num);min-width:64px}
+.mapsvg{display:block;width:100%;height:auto;overflow:hidden;border-radius:10px}
+.mapsvg text{font-family:var(--f-ui)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;padding:6px 16px 14px;font-size:12.5px;color:var(--ink-2);align-items:center}
+.sw{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+
+.queue{list-style:none;margin:0;padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
+.q{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;grid-template-columns:4px 1fr;gap:0 12px;background:var(--panel)}
+.q .bar{border-radius:4px;background:var(--sev)}
+.q .hd{display:flex;gap:8px;align-items:baseline;font-size:12.5px;color:var(--ink-3)}
+.q .hd b{color:var(--sev);font-weight:700;font-size:12.5px}
+.q .hd span:last-child{margin-left:auto}
+.q p{margin:3px 0 8px;font-size:13.5px;line-height:1.4}
+.q .acts{display:flex;gap:8px;flex-wrap:wrap}
+.q.done{opacity:.75;--sev:var(--ok)}
+.crit{--sev:var(--crit)} .act{--sev:var(--dust)} .sensor{--sev:var(--info)} .node{--sev:var(--ok)}
+.btn{border:1px solid var(--line-2);background:var(--panel);border-radius:7px;padding:5px 11px;font-size:13px;font-weight:600}
+.btn:hover{border-color:var(--ink-3)}
+.btn.go{background:var(--act);color:var(--act-ink);border-color:var(--act)}
+.btn.go:hover{opacity:.9}
+.okline{font-size:13px;color:var(--ok);font-weight:600}
+
+.rank{list-style:none;margin:0;padding:6px 16px 14px;counter-reset:r}
+.rank li{display:grid;grid-template-columns:22px 1fr auto;gap:10px;padding:8px 0;border-top:1px solid var(--line);align-items:baseline}
+.rank li:first-child{border-top:0}
+.rank .i{font:600 18px var(--f-num);color:var(--dust-ink)}
+.rank .s{font-weight:600}
+.rank .w{display:block;font-size:12.5px;color:var(--ink-3)}
+.pill{font-size:12px;font-weight:600;padding:2px 8px;border-radius:99px;border:1px solid var(--pc);color:var(--pc);background:var(--pt);white-space:nowrap}
+.p-crit{--pc:var(--crit);--pt:var(--crit-tint)} .p-act{--pc:var(--dust-ink);--pt:var(--dust-tint)} .p-ok{--pc:var(--ok);--pt:var(--ok-tint)} .p-info{--pc:var(--info);--pt:var(--info-tint)} .p-mute{--pc:var(--ink-3);--pt:var(--sunk)}
+
+/* tables */
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{font-weight:600;color:var(--ink-3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);font-size:12.5px}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr{cursor:pointer}
+.tbl tbody tr:hover td{background:var(--sunk)}
+.tw{overflow-x:auto;padding:4px 4px 6px}
+.prob{display:flex;align-items:center;gap:8px}
+.prob .t{width:70px;height:6px;border-radius:9px;background:var(--sunk);border:1px solid var(--line);overflow:hidden}
+.prob .t i{display:block;height:100%;background:var(--dust)}
+
+/* case detail */
+.cd{display:grid;grid-template-columns:290px minmax(0,1fr) 380px;gap:16px;align-items:start}
+.steps{list-style:none;margin:0;padding:8px 16px 12px;position:relative}
+.steps li{display:grid;grid-template-columns:18px 1fr;gap:10px;padding:2px 0;position:relative}
+.steps li::before{content:"";position:absolute;left:8px;top:22px;bottom:-6px;width:2px;background:var(--line)}
+.steps li:last-child::before{display:none}
+.steps .k{width:18px;height:18px;border-radius:50%;border:2px solid var(--line-2);background:var(--panel);margin-top:1px;z-index:1}
+.steps .done .k{background:var(--ok);border-color:var(--ok)}
+.steps .now .k{background:var(--dust);border-color:var(--dust);box-shadow:0 0 0 4px var(--dust-tint)}
+.steps .nm{font-weight:600;font-size:13px}
+.steps .tx{font-size:12.5px;color:var(--ink-3)}
+.steps .wait .nm{color:var(--ink-3)}
+.hyp{padding:10px 16px 14px;display:flex;flex-direction:column;gap:8px}
+.hyp .r{display:grid;grid-template-columns:150px 1fr 44px;gap:10px;align-items:center;font-size:13.5px}
+.hyp .t{height:10px;background:var(--sunk);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.hyp .t i{display:block;height:100%;background:var(--ink)}
+.hyp .r:first-child .t i{background:var(--dust)}
+.acols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;padding:10px 16px 6px}
+.acol h3{font:600 15px var(--f-num);margin:0 0 6px;color:var(--ink-2)}
+.ac{border:1px solid var(--line);border-radius:9px;padding:5px 10px;margin-bottom:5px;display:flex;flex-direction:column;gap:3px}
+.ac .row{display:flex;gap:8px;align-items:center}
+.ac .nm{font-weight:700;font-size:12px;letter-spacing:.01em;min-width:0;overflow-wrap:normal}
+.ac .row .pill{margin-left:auto;flex:none}
+.ac .why{font-size:12.5px;color:var(--ink-2)}
+.ac.new{border-color:var(--dust);background:var(--dust-tint)}
+.ac.gone{opacity:.55}
+.ac.gone .nm{text-decoration:line-through}
+.changed{margin:10px 16px 4px;border-left:3px solid var(--dust);background:var(--sunk);padding:10px 12px;border-radius:0 8px 8px 0;font-size:13.5px}
+.ev{list-style:none;margin:0;padding:8px 16px 14px;display:flex;flex-direction:column;gap:8px}
+.ev li{display:grid;grid-template-columns:auto 1fr;gap:10px;font-size:13px;align-items:start}
+.ev .src{font-size:11.5px;font-weight:600;color:var(--ink-3);border:1px solid var(--line);border-radius:5px;padding:1px 6px;white-space:nowrap}
+.chart{display:block;width:100%;height:auto}
+.chart text{font-family:var(--f-ui);font-size:11px;fill:var(--ink-3)}
+
+/* site */
+.sh{display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap}
+.score{display:flex;align-items:flex-end;gap:12px;margin-left:auto}
+.score .v{font:600 56px/0.9 var(--f-num);color:var(--dust-ink)}
+.score .l{font-size:13px;color:var(--ink-2)}
+.sitegrid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;align-items:start}
+.strip{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:3px;padding:12px 16px 4px}
+.slot{height:46px;border-radius:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;font-size:11.5px;font-weight:700;background:var(--sb);color:var(--sc)}
+.slot small{font-weight:500;opacity:.9}
+.s-avoid{--sb:var(--crit);--sc:#FFF6F2} .s-caution{--sb:var(--dust);--sc:#16171A} .s-go{--sb:var(--ok);--sc:#F3FBF6}
+.dayl{display:grid;grid-template-columns:1fr 1fr;padding:0 16px;font-size:12px;color:var(--ink-3)}
+.reasons{margin:8px 16px 14px;padding-left:18px;font-size:13.5px;color:var(--ink-2)}
+.fixes{list-style:none;margin:0;padding:8px 16px 14px;display:flex;flex-direction:column;gap:8px}
+.fix{display:grid;grid-template-columns:1fr auto;gap:2px 12px;border:1px solid var(--line);border-radius:9px;padding:9px 12px}
+.fix b{font-size:14px}
+.fix .h{font-size:12.5px;color:var(--ink-2)}
+.fix .due{font-size:12.5px;font-weight:600;color:var(--dust-ink);text-align:right}
+.fix.ok .due{color:var(--ok)}
+.ctrl{padding:8px 16px 14px;display:flex;flex-direction:column;gap:12px}
+.cr{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.cr .h{font-size:12.5px;color:var(--ink-3)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:var(--panel);padding:5px 12px;font-size:13px;font-weight:600;border-left:1px solid var(--line-2)}
+.seg button:first-child{border-left:0}
+.seg button[aria-pressed="true"]{background:var(--act);color:var(--act-ink)}
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;padding:8px 16px 14px;font-size:13.5px}
+.checks div{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding:5px 0}
+.pass{color:var(--ok);font-weight:700} .fail{color:var(--crit);font-weight:700}
+
+/* forecast grid */
+.fgrid{display:grid;grid-template-columns:120px repeat(24,minmax(0,1fr));gap:2px;padding:12px 16px 6px;font-size:12px}
+.fgrid .w{font-weight:600;display:flex;align-items:center}
+.fgrid .c{height:30px;border-radius:3px}
+.fgrid .h{color:var(--ink-3);text-align:left;font-size:11px}
+.fgrid .w.me{color:var(--dust-ink)}
+.ramp{display:flex;align-items:center;gap:6px;padding:4px 16px 14px;font-size:12px;color:var(--ink-2);flex-wrap:wrap}
+.ramp i{display:inline-block;width:28px;height:10px;border-radius:2px}
+.fc2{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:16px;align-items:start}
+
+/* sensors */
+.sg{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px;align-items:start}
+.trust{display:flex;align-items:center;gap:8px}
+.trust .t{width:80px;height:6px;border-radius:9px;background:var(--sunk);border:1px solid var(--line);overflow:hidden}
+.trust .t i{display:block;height:100%}
+
+/* resident */
+.phone{width:400px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.phone .panel{padding:16px}
+.big{font:600 56px/0.95 var(--f-num)}
+.cats{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.cat{border:1px solid var(--line-2);background:var(--panel);border-radius:99px;padding:6px 12px;font-size:13.5px}
+.cat[aria-pressed="true"]{background:var(--act);color:var(--act-ink);border-color:var(--act)}
+.phone label{display:block;font-size:13px;font-weight:600;margin:10px 0 4px}
+.phone textarea,.phone input[type=file]{width:100%;border:1px solid var(--line-2);border-radius:8px;padding:8px;background:var(--sunk)}
+.send{margin-top:12px;width:100%;padding:11px;border:0;border-radius:9px;background:var(--act);color:var(--act-ink);font-weight:700}
+.okbox{border:1px solid var(--ok);background:var(--ok-tint);border-radius:9px;padding:10px 12px;font-size:13.5px;margin-top:12px}
+
+.toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--panel);padding:10px 16px;border-radius:9px;font-weight:600;font-size:13.5px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px);z-index:9}
+.toast.show{opacity:1}
+@media (prefers-reduced-motion: reduce){.toast{transition:none}}
+
+@media (max-width:1200px){
+  .ov,.cd,.sitegrid,.fc2,.sg{grid-template-columns:minmax(0,1fr)}
+  .stats{grid-template-columns:1fr 1fr}
+  .side{height:auto;min-height:0}
+  .stat:nth-child(3){border-left:0}
+}
+@media (max-width:760px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .rail{position:static;height:auto;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:2px;padding:8px 10px;overflow-x:auto}
+  .mark b,.mark strong{font-size:18px}
+  .rail .grow,.who,.mark small{display:none}
+  .mark{padding:4px 8px}
+  .nav{width:auto;padding:7px 9px}
+  .nav span.lbl{display:none}
+  .top{flex-wrap:wrap;padding:10px 16px}
+  .top input{width:100%}
+  .view{padding:16px}
+  .stats{grid-template-columns:minmax(0,1fr)}
+  .stat{border-left:0;border-top:1px solid var(--line)} .stat:first-child{border-top:0}
+  .acols,.checks{grid-template-columns:1fr}
+  .strip{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .phone{width:100%}
+  .fgrid{grid-template-columns:90px repeat(24,minmax(8px,1fr))}
+}
+
+
+/* impact + manager */
+.im{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:16px;align-items:start}
+.bars{padding:10px 16px 14px;display:flex;flex-direction:column;gap:10px}
+.bars .r{display:grid;grid-template-columns:170px 1fr 52px;gap:12px;align-items:center;font-size:13.5px}
+.bars .t{height:12px;border-radius:99px;background:var(--sunk);overflow:hidden}
+.bars .t i{display:block;height:100%;border-radius:99px}
+.mv td .up{color:var(--ok);font-weight:700}
+.note{font-size:12.5px;color:var(--ink-3);margin:0 16px 14px}
+.notif{display:grid;grid-template-columns:36px 1fr;gap:4px 12px;align-items:center;padding:12px 14px;border-radius:18px;background:rgba(255,255,255,.07);border:1px solid var(--line-2);backdrop-filter:blur(8px)}
+:root[data-theme="light"] .notif{background:var(--panel)}
+.notif .ic{grid-row:span 2;width:36px;height:36px;border-radius:10px;background:var(--sunk);display:grid;place-items:center}
+.notif .t1{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3)}
+.notif .t2{font-size:13.5px;font-weight:600}
+.mini{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:3px;margin:10px 0 4px}
+.mini .slot{height:40px;font-size:11px;border-radius:7px}
+.row2{display:flex;gap:8px;margin-top:12px}
+.row2 .btn{flex:1;padding:9px 12px;font-size:14px}
+.kv{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-top:1px solid var(--line);font-size:13.5px}
+.kv:first-of-type{border-top:0}
+/* Reference pass: near-black monochrome, soft glass cards, pill controls, light large numerals. Amber only marks dust. */
+body{background:radial-gradient(1100px 540px at 80% -10%,rgba(224,162,69,.09),transparent 62%),radial-gradient(800px 500px at -5% 105%,rgba(255,255,255,.035),transparent 60%),var(--paper);background-attachment:fixed;font-size:14px;letter-spacing:-.003em}
+.rail{background:transparent;border-right:1px solid var(--line)}
+.mark b{font:700 21px/1 var(--f-num);letter-spacing:-.02em}
+.nav{border-radius:999px;padding:9px 14px}
+@media (max-width:760px){.nav{padding:7px 8px}.mark>div{display:none} body[data-view=resident] .top,body[data-view=manager] .top{display:none}}
+.nav[aria-current="page"]{background:var(--ink);color:var(--paper);box-shadow:none;font-weight:600}
+.nav[aria-current="page"] .count{background:var(--paper);color:var(--ink)}
+.top{background:rgba(11,11,12,.72);backdrop-filter:blur(10px)}
+:root[data-theme="light"] .top{background:var(--panel)}
+.top select,.top input{border-radius:999px;padding:8px 14px;background:var(--sunk)}
+.demo{border-radius:999px;padding:3px 10px}
+h1{font:600 30px/1.1 var(--f-num);letter-spacing:-.025em}
+.ph h2{font:600 17px/1.2 var(--f-num);letter-spacing:-.01em}
+.panel{background:var(--glass),var(--panel);border-radius:18px}
+.stats{background:none;border:0;gap:12px}
+.stat{background:var(--glass),var(--panel);border:1px solid var(--line);border-radius:18px;padding:14px 20px;align-items:center}
+.stat:first-child{border-left:1px solid var(--line)}
+.stat .v{font:300 42px/1 var(--f-num);letter-spacing:-.03em}
+.stat .d{font-size:12.5px}
+#mapbox svg{max-height:430px}
+.mapsvg{border-radius:14px}
+.hourlbl{font:400 24px/1 var(--f-num);letter-spacing:-.02em}
+.play{background:var(--sunk)}
+.q{border-radius:14px;background:rgba(255,255,255,.02)}
+.btn{border-radius:999px;padding:5px 13px;background:rgba(255,255,255,.04)}
+:root[data-theme="light"] .btn{background:var(--panel)}
+.btn.go{background:var(--act);color:var(--act-ink);border-color:var(--act)}
+.ac{border-radius:12px}
+.fix,.okbox{border-radius:12px}
+.seg{border-radius:999px}
+.score .v,.big{font-weight:300;letter-spacing:-.03em}
+.rank .i{font-weight:400}
+.fgrid .c{border-radius:5px}
+.send{border-radius:999px}
+.toast{border-radius:999px;background:var(--ink);color:var(--paper)}
+.hyp .t i{background:var(--ink-2)}
+@media (max-width:1200px){.stat:nth-child(3){border-left:1px solid var(--line)}}
+@media (max-width:760px){.stat{border-left:1px solid var(--line)} .stat:first-child{border-top:1px solid var(--line)} .stat{border-top:1px solid var(--line)}}
+</style>
+
+<div class="app">
+  <aside class="rail" aria-label="Main navigation">
+    <div class="mark">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><circle cx="15" cy="15" r="14" fill="none" stroke="#D28A22" stroke-width="2"/><path d="M6 18c4-6 9-6 18-3" stroke="#E9EDF4" stroke-width="2" fill="none" stroke-linecap="round"/><circle cx="11" cy="11" r="2" fill="#D28A22"/><circle cx="17" cy="9" r="1.5" fill="#D28A22"/><circle cx="21" cy="12" r="1.2" fill="#D28A22"/></svg>
+      <div><b>DustTrace</b><small>BMC ward console</small></div>
+    </div>
+    <button class="nav" data-go="overview"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span class="lbl">Overview</span></button>
+    <button class="nav" data-go="cases"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M9 7V5h6v2"/><path d="M4 12h16"/></svg><span class="lbl">Cases</span><span class="count" id="casecount">3</span></button>
+    <button class="nav" data-go="site"><svg viewBox="0 0 24 24"><path d="M4 21V9l6-4v16"/><path d="M10 21V11h10v10"/><path d="M3 21h18"/></svg><span class="lbl">Sites</span></button>
+    <button class="nav" data-go="forecast"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 6"/><path d="M3 21h18"/></svg><span class="lbl">Forecast</span></button>
+    <button class="nav" data-go="sensors"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8 8a6 6 0 0 0 0 8M16 8a6 6 0 0 1 0 8M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg><span class="lbl">Sensors and buses</span></button>
+    <button class="nav" data-go="impact"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span class="lbl">Impact</span></button>
+    <button class="nav" data-go="resident"><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg><span class="lbl">Resident view</span></button>
+    <button class="nav" data-go="manager"><svg viewBox="0 0 24 24"><path d="M3 21h18M6 21V10l6-5 6 5v11"/><path d="M10 21v-6h4v6"/></svg><span class="lbl">Site manager app</span></button>
+    <div class="grow"></div>
+    <div class="who"><b>R. Kulkarni</b>Ward environment officer, K-East</div>
+  </aside>
+
+  <div class="mainwrap" style="min-width:0">
+    <header class="top">
+      <label class="sr" for="ward" style="position:absolute;left:-9999px">Ward</label>
+      <select id="ward" aria-label="Ward"><option>K-East · Andheri East</option><option>P-North · Malad</option><option>K-West · Andheri West</option></select>
+      <input id="search" type="search" placeholder="Search sites, cases, sensors" aria-label="Search">
+      <div class="sp"></div>
+      <div class="live"><i></i>Live feed</div>
+      <div class="when tab" id="clock">Thu 12 Nov, 08:40</div>
+      <div class="demo">Demo data</div>
+    </header>
+
+    <section class="view" id="v-overview"></section>
+    <section class="view" id="v-cases" hidden></section>
+    <section class="view" id="v-case" hidden></section>
+    <section class="view" id="v-site" hidden></section>
+    <section class="view" id="v-forecast" hidden></section>
+    <section class="view" id="v-sensors" hidden></section>
+    <section class="view" id="v-resident" hidden></section>
+    <section class="view" id="v-impact" hidden></section>
+    <section class="view" id="v-manager" hidden></section>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  const $=s=>document.querySelector(s);
+  const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const pad=n=>String(n).padStart(2,'0');
+  function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2200)}
+
+  // ---------------- demo data ----------------
+  const SITES={
+    A:{name:'Metro Line 7A excavation',x:300,y:255,score:64,trust:82,sensor:'trusted',pm:118,win:['avoid','avoid','caution','go','go','caution','avoid','caution','go','go','go','caution'],dev:'MMRDA contractor'},
+    B:{name:'Tower demolition, Chakala',x:470,y:150,score:41,trust:71,sensor:'trusted',pm:312,crit:true,win:['avoid','avoid','avoid','caution','go','caution','avoid','avoid','caution','go','go','caution'],dev:'Shreeji Developers (demo)'},
+    C:{name:'Redevelopment, Marol',x:205,y:400,score:38,trust:28,sensor:'untrusted',pm:24,win:['avoid','caution','caution','go','go','go','caution','caution','go','go','go','go'],dev:'Sai Constructions (demo)'},
+    D:{name:'Debris yard (unregistered)',x:600,y:375,score:45,trust:null,sensor:'none',pm:null,win:['avoid','avoid','caution','go','go','caution','avoid','caution','go','go','go','caution'],dev:'Unknown'},
+    E:{name:'Housing tower, Saki Naka',x:735,y:440,score:86,trust:91,sensor:'trusted',pm:64,win:['caution','go','go','go','go','go','caution','go','go','go','go','go'],dev:'Orbit Realty (demo)'},
+    F:{name:'Road widening, Sahar Rd',x:540,y:255,score:58,trust:77,sensor:'trusted',pm:96,win:['avoid','caution','caution','go','go','caution','avoid','caution','go','go','go','caution'],dev:'BMC Roads'}
+  };
+  const RECEPTORS=[{n:"St. Xavier's School",x:640,y:220,t:'school'},{n:'Holy Spirit Hospital',x:130,y:175,t:'hosp'},{n:'Marol municipal school',x:345,y:435,t:'school'}];
+  const NODES=[{id:'N-03',x:668,y:205,pm:146,where:"St. Xavier's School"},{id:'N-07',x:372,y:420,pm:92,where:'Marol municipal school'},{id:'N-11',x:155,y:160,pm:71,where:'Holy Spirit Hospital'},{id:'N-12',x:430,y:330,pm:88,where:'Sunshine CHS (society)'}];
+  const ROUTE='M60 300 C 180 290, 260 330, 330 330 S 480 300, 560 315 S 720 360, 860 350';
+  const BUSES=[{id:'BEST 4512',t:.18,pm:132},{id:'BEST 4520',t:.47,pm:164},{id:'BEST 4537',t:.78,pm:101}];
+  const ALERTS=[
+    {id:1,cls:'crit',kind:'Critical',time:'08:32',site:'B',text:'Site B reads 312 µg/m³ PM10 for 20 minutes with the mist curtain off.',act:'Turn on mist',done:'Mist curtain on at 08:33'},
+    {id:2,cls:'act',kind:'Safe-Work Window broken',time:'08:10',site:'A',text:'Site A logged demolition inside its Avoid window (07:00–11:00).',act:'Notify manager',done:'Manager notified on WhatsApp'},
+    {id:3,cls:'sensor',kind:'Sensor',time:'07:55',site:'C',text:'Site C sensor flat at 24 µg/m³ for 3 h while bus BEST 4520 read 164 at the gate.',act:'Add to inspection',done:'Added to today’s list'},
+    {id:4,cls:'node',kind:'School node',time:'07:40',site:null,text:'PM10 at St. Xavier’s School is 146 and rising. Site A plume overhead until 11:00.',act:'Alert school',done:'School told to shut windows and run purifiers'},
+    {id:5,cls:'act',kind:'Resident report',time:'07:20',site:'D',text:'QR report at Site D: uncovered debris, photo verified.',act:'Send fix',done:'Fix sent: cover within 2 hours'}
+  ];
+  const INSPECT=[['B','Critical spike with mist off; debris uncovered','p-crit','Critical'],['C','Sensor flat; bus reading 6× higher','p-info','Sensor'],['D','No sensor; found by satellite; resident photo','p-act','Hidden site'],['A','Demolition inside Avoid window','p-act','Window'],['F','Routine; last visit 41 days ago','p-mute','Routine']];
+  const CASES=[
+    {id:'DT-KE-0142',trigger:'Forecast spike',site:'A',cause:'Dry excavation',p:.52,stage:'Awaiting approval',sc:'p-act',route:'L1',opened:'Wed 18:00'},
+    {id:'DT-KE-0145',trigger:'Live exceedance',site:'B',cause:'Demolition without mist',p:.81,stage:'Verifying',sc:'p-info',route:'auto',opened:'Thu 08:32'},
+    {id:'DT-KE-0144',trigger:'Sensor audit',site:'C',cause:'Sensor fault',p:.74,stage:'Awaiting approval',sc:'p-act',route:'L1',opened:'Thu 07:55'},
+    {id:'DT-KE-0143',trigger:'Resident QR report',site:'D',cause:'Uncovered debris',p:.88,stage:'Awaiting site',sc:'p-mute',route:'site',opened:'Thu 07:20'},
+    {id:'DT-KE-0141',trigger:'School node',site:'A',cause:'Dry excavation',p:.61,stage:'Acting',sc:'p-info',route:'auto',opened:'Thu 07:40'},
+    {id:'DT-KE-0139',trigger:'Satellite find',site:'D',cause:'Uncovered debris',p:.69,stage:'Awaiting approval',sc:'p-act',route:'L1',opened:'Tue 11:10'},
+    {id:'DT-KE-0137',trigger:'Live exceedance',site:'F',cause:'Truck track-out',p:.57,stage:'Closed, PM fell 38%',sc:'p-ok',route:'site',opened:'Mon 09:05'},
+    {id:'DT-KE-0133',trigger:'Live exceedance',site:'E',cause:'Not construction (RMC plant)',p:.66,stage:'Referred to MPCB',sc:'p-ok',route:'L1',opened:'Sun 16:20'}
+  ];
+  const WARDS=['K-East','K-West','P-North','L','H-East','M-East','S','G-North'];
+  let S={view:'overview',hour:8,handled:{},approved:{},mist:{A:'auto',B:'on',C:'auto',D:'off',E:'auto',F:'auto'},site:'A',fixed:{},cat:'Uncovered debris',sent:false,playing:null,accepted:false,photo:false};
+
+  function slotAt(k,h){const i=Math.max(0,Math.min(5,Math.floor((h-6)/2)));return SITES[k].win[i]}
+
+  // ---------------- map ----------------
+  function plume(k,h){const s=SITES[k];if(s.crit&&!S.handled[1]) return 1.0;const w=slotAt(k,h);return w==='avoid'?0.9:w==='caution'?0.5:0.18}
+  function mapSVG(h,opts={}){
+    const morning=h<12, ang=morning?-8:24, len=morning?1:1.25;
+    let g=`<svg class="mapsvg" viewBox="0 0 900 540" role="img" aria-label="Ward map of K-East with construction sites, forecast dust plumes, schools, a hospital, DustTrace Nodes and a BEST bus route">
+    <rect width="900" height="540" rx="10" fill="var(--map)"/>
+    <path d="M40 60 L380 28 L820 70 L870 300 L800 510 L300 520 L60 470 Z" fill="var(--map-land)" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="7 6"/>
+    <path d="M520 520 C 560 470, 610 450, 700 470 S 850 500, 900 470" fill="none" stroke="var(--water)" stroke-width="10" opacity=".8"/>
+    <rect x="610" y="70" width="230" height="18" rx="4" fill="var(--runway)" transform="rotate(-14 725 79)"/>
+    <text x="830" y="34" font-size="11.5" fill="var(--ink-3)" text-anchor="end">Airport runway</text>
+    <path d="M250 20 C 255 140, 262 300, 270 535" stroke="var(--road)" stroke-width="14" fill="none"/>
+    <text x="230" y="38" font-size="11.5" fill="var(--ink-3)" text-anchor="end">Western Express Hwy</text>
+    <path d="M20 215 C 200 225, 420 190, 890 165" stroke="var(--road)" stroke-width="11" fill="none"/>
+    <text x="840" y="155" font-size="11.5" fill="var(--ink-3)" text-anchor="end">Andheri–Kurla Rd</text>
+    <path d="M300 520 C 420 420, 560 290, 880 250" stroke="var(--road)" stroke-width="7" fill="none"/>
+    <path d="M30 120 L 880 112" stroke="var(--ink-3)" stroke-width="2" stroke-dasharray="2 6" fill="none"/>
+    <text x="40" y="108" font-size="11.5" fill="var(--ink-3)">Metro Line 1</text>
+    <path d="${ROUTE}" stroke="var(--info)" stroke-width="3" fill="none" stroke-dasharray="1 0" opacity=".55"/>`;
+    // plumes
+    Object.entries(SITES).forEach(([k,s])=>{const v=plume(k,h);if(v<0.3)return;
+      const L=[[230*len,46,'var(--c3)',.55*v],[150*len,30,'var(--c4)',.6*v],[80*len,18,'var(--c5)',.65*v]];
+      g+=`<g transform="rotate(${ang} ${s.x} ${s.y})">`+L.map(([rx,ry,c,o])=>`<ellipse cx="${s.x+rx*0.82}" cy="${s.y}" rx="${rx}" ry="${ry}" fill="${c}" opacity="${o.toFixed(2)}"/>`).join('')+`</g>`});
+    // receptors
+    RECEPTORS.forEach(r=>{g+= r.t==='school'?`<g><rect x="${r.x-14}" y="${r.y-10}" width="28" height="20" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.6"/><path d="M${r.x-18} ${r.y-9} L${r.x} ${r.y-24} L${r.x+18} ${r.y-9}Z" fill="var(--ink)"/><text x="${r.x}" y="${r.y+28}" font-size="11.5" font-weight="600" fill="var(--ink)" text-anchor="middle">${esc(r.n)}</text></g>`
+      :`<g><rect x="${r.x-13}" y="${r.y-13}" width="26" height="26" rx="4" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.6"/><path d="M${r.x} ${r.y-7}v14M${r.x-7} ${r.y}h14" stroke="var(--crit)" stroke-width="3"/><text x="${r.x}" y="${r.y+30}" font-size="11.5" font-weight="600" fill="var(--ink)" text-anchor="middle">${esc(r.n)}</text></g>`});
+    // nodes
+    NODES.forEach(n=>{g+=`<g><rect x="${n.x-7}" y="${n.y-7}" width="14" height="14" transform="rotate(45 ${n.x} ${n.y})" fill="var(--ok)" stroke="var(--panel)" stroke-width="2"/></g>`});
+    // buses
+    if(!opts.noBus) g+=`<g id="buses"></g>`;
+    // sites
+    Object.entries(SITES).forEach(([k,s])=>{
+      const w=slotAt(k,h); const c= s.sensor!=='trusted'?'var(--ink-3)': (s.crit&&!S.handled[1])?'var(--crit)': w==='avoid'?'var(--dust)': w==='go'?'var(--ok)':'var(--dust)';
+      g+=`<g class="sitept" data-site="${k}" tabindex="0" role="button" aria-label="Open site ${k}" style="cursor:pointer"><circle cx="${s.x}" cy="${s.y}" r="15" fill="${c}" stroke="var(--panel)" stroke-width="3" ${s.sensor!=='trusted'?'stroke-dasharray="4 3"':''}/><text x="${s.x}" y="${s.y+5}" text-anchor="middle" font-size="14" font-weight="700" fill="${s.sensor!=='trusted'?'#fff':'#16171A'}">${k}</text></g>`});
+    // wind
+    g+=`<g transform="translate(40 500)"><circle r="22" fill="var(--panel)" stroke="var(--line-2)"/><path d="M-12 0 L12 0" stroke="var(--ink)" stroke-width="2.5" transform="rotate(${ang})"/><path d="M6 -6 L13 0 L6 6" stroke="var(--ink)" stroke-width="2.5" fill="none" transform="rotate(${ang})"/><text x="32" y="5" font-size="12" fill="var(--ink-2)">${morning?'Wind 2 m/s from W, shallow mixing layer':'Wind 4 m/s, sea breeze, deeper mixing'}</text></g>`;
+    return g+`</svg>`;
+  }
+  function placeBuses(){const svg=document.querySelector('#v-overview .mapsvg');if(!svg)return;const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',ROUTE);svg.appendChild(p);const L=p.getTotalLength();
+    const g=svg.querySelector('#buses');g.innerHTML=BUSES.map(b=>{const t=(b.t+ (S.hour-8)*0.035+1)%1;const pt=p.getPointAtLength(L*t);return `<g><rect x="${pt.x-11}" y="${pt.y-7}" width="22" height="14" rx="3" fill="var(--info)" stroke="var(--panel)" stroke-width="2"/></g>`}).join('');p.remove()}
+
+  // ---------------- views ----------------
+  function vOverview(){
+    const open=ALERTS.filter(a=>!S.handled[a.id]).length;
+    const inAvoid=Object.keys(SITES).filter(k=>slotAt(k,S.hour)==='avoid').length*2;
+    $('#v-overview').innerHTML=`
+      <div><h1>K-East, Thursday 12 November</h1>
+      <p class="lede">Dust risk is <b>high tomorrow from 07:00 to 11:00</b>. Twelve sites have Avoid windows, misting is scheduled at nine, and <b>${open} items need you</b> this morning.</p></div>
+      <div class="stats">
+        <div class="stat risk"><span class="v n">78%</span><span class="d">chance PM10 crosses 100 µg/m³ tomorrow, 07:00–11:00</span></div>
+        <div class="stat"><span class="v n">${inAvoid}</span><span class="d">sites in an Avoid window at ${pad(S.hour)}:00</span></div>
+        <div class="stat"><span class="v n">7</span><span class="d">site sensors not trusted</span></div>
+        <div class="stat"><span class="v n">64</span><span class="d">readings in the last hour from 18 fixed nodes and 46 buses</span></div>
+      </div>
+      <div class="ov">
+        <div class="panel">
+          <div class="ph"><h2>Dust weather, tomorrow</h2><span class="meta">Forecast plumes from active sites</span></div>
+          <div class="mapbar">
+            <button class="play" id="play" aria-label="Play the day"><svg viewBox="0 0 14 14"><path d="M3 1.5v11l9-5.5z"/></svg></button>
+            <span class="hourlbl n" id="hl">${pad(S.hour)}:00</span>
+            <div class="scrub"><input type="range" id="hour" min="6" max="18" value="${S.hour}" aria-label="Forecast hour"><div class="ticks"><span>06:00</span><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span></div></div>
+          </div>
+          <div id="mapbox" style="padding:4px 12px 0">${mapSVG(S.hour)}</div>
+          <div class="legend">
+            <span><i class="sw" style="background:var(--c5)"></i>PM10 above 150</span><span><i class="sw" style="background:var(--c4)"></i>100–150</span><span><i class="sw" style="background:var(--c3)"></i>60–100</span>
+            <span><i class="dot" style="background:var(--crit)"></i>Critical now</span><span><i class="dot" style="background:var(--dust)"></i>Avoid window</span><span><i class="dot" style="background:var(--ok)"></i>Go window</span><span><i class="dot" style="background:var(--ink-3)"></i>Sensor not trusted or missing</span>
+            <span><i class="sw" style="background:var(--ok);transform:rotate(45deg);width:10px"></i>DustTrace Node</span><span><i class="sw" style="background:var(--info)"></i>BEST bus with sensor</span>
+          </div>
+        </div>
+        <div class="side">
+          <div class="panel"><div class="ph"><h2>Needs you</h2><span class="meta">${open} open</span></div><ul class="queue">${ALERTS.map(a=>{const d=S.handled[a.id];return `<li class="q ${d?'done':a.cls}"><span class="bar"></span><div><div class="hd"><b>${d?'Handled':a.kind}</b><span class="tab">${a.time}</span></div><p>${esc(a.text)}</p><div class="acts">${d?`<span class="okline">${esc(a.done)}</span>`:`<button class="btn go" data-alert="${a.id}">${a.act}</button>`}${a.site?`<button class="btn" data-site="${a.site}">Site ${a.site}</button>`:''}</div></div></li>`}).join('')}</ul></div>
+        </div>
+      </div>`;
+    placeBuses();
+  }
+  function vCases(){
+    $('#v-cases').innerHTML=`<div><h1>Cases</h1><p class="lede">Every trigger opens a case. The agent investigates, weighs likely causes, and proposes actions under dust rules D1–D10. You approve anything above automatic.</p></div>
+    <div class="panel"><div class="ph"><h2>Open and recent</h2><span class="meta">${CASES.length} cases this week</span></div><div class="tw"><table class="tbl"><thead><tr><th>Case</th><th>Trigger</th><th>Site</th><th>Likely cause</th><th>Stage</th><th>Approval</th><th>Opened</th></tr></thead><tbody>
+    ${CASES.map(c=>`<tr data-case="${c.id}"><td><b class="tab">${c.id}</b></td><td>${c.trigger}</td><td>${c.site} · ${esc(SITES[c.site].name)}</td><td><div class="prob"><span>${esc(c.cause)}</span><span class="t"><i style="width:${c.p*100}%"></i></span><span class="tab muted">${Math.round(c.p*100)}%</span></div></td><td><span class="pill ${S.approved[c.id]?'p-info':c.sc}">${S.approved[c.id]?'Acting':c.stage}</span></td><td>${c.route==='auto'?'Automatic':c.route==='site'?'Site manager':'Ward officer (L1)'}</td><td class="tab muted">${c.opened}</td></tr>`).join('')}
+    </tbody></table></div></div>
+    <div class="panel"><div class="ph"><h2>What the agent did this week</h2></div><div class="stats" style="border:0;margin:6px 4px 4px"><div class="stat"><span class="v n">41</span><span class="d">preventive actions sent before a spike</span></div><div class="stat"><span class="v n">9</span><span class="d">fixes verified by a PM drop</span></div><div class="stat"><span class="v n">2</span><span class="d">referred to MPCB as not construction</span></div><div class="stat"><span class="v n">0</span><span class="d">notices on a single signal (rule D1)</span></div></div></div>`;
+  }
+  function vCase(){
+    const ok=S.approved['DT-KE-0142'];
+    const steps=[['Triggered','Wed 18:00 · forecast P = 0.78','done'],['Case opened','Site A, Metro Line 7A','done'],['Investigated','Station, site sensor, 2 nodes, bus 4512, wind, imagery','done'],['Cause attributed','Dry excavation most likely','done'],['Evidence requested','Gate photo from the site (D1)','done'],['No reply by 21:00','None assumed (D7)','done'],['Decided','5 actions under D2, D3, D7','done'],['Approval',ok?'Approved by R. Kulkarni':'Inspection needs your sign-off',ok?'done':'now'],['Acting','Window sent, mist from 05:30',ok?'now':'wait'],['Verifying','Compare school node, 07:00–11:00','wait'],['Memory','Update Dust Score and fix outcomes','wait']];
+    const H=[['Dry excavation',.52],['Truck track-out',.28],['Not construction',.12],['Sensor fault',.08]];
+    const ini=[['ISSUE_SAFE_WORK_WINDOW','Automatic','D2: P = 0.78; plume reaches the school 07–11','p-ok'],['SCHEDULE_MIST','Automatic','D2: relay available; on 05:30–11:00','p-ok'],['ALERT_RECEPTOR','Automatic','D3: school downwind in Avoid window','p-ok'],['REQUEST_SITE_PHOTO','Site','D1: track-out rests on gate spikes alone','p-mute']];
+    const fin=[['ISSUE_SAFE_WORK_WINDOW','Automatic','D2','p-ok'],['SCHEDULE_MIST','Automatic','D2','p-ok'],['ALERT_RECEPTOR','Automatic','D3','p-ok'],['ORDER_WHEEL_WASH','Site','Playbook: gate spikes at truck times','p-mute','new'],['ADD_TO_INSPECTION','Ward officer (L1)','D7: photo not received by 21:00','p-act','new']];
+    $('#v-case').innerHTML=`<div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap"><div><button class="btn" data-go="cases" style="margin-bottom:8px">All cases</button><h1 class="tab">DT-KE-0142 · Site A, Metro Line 7A excavation</h1><p class="lede">Opened by tomorrow’s forecast: dust expected at St. Xavier’s School, 07:00–11:00.</p></div><span class="pill ${ok?'p-info':'p-act'}" style="margin-left:auto">${ok?'Acting':'Awaiting your approval'}</span></div>
+    <div class="cd">
+      <div class="panel"><div class="ph"><h2>How the agent got here</h2></div><ol class="steps">${steps.map(([n,t,s])=>`<li class="${s}"><span class="k"></span><div><div class="nm">${n}</div><div class="tx">${t}</div></div></li>`).join('')}</ol></div>
+      <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+        <div class="panel"><div class="ph"><h2>Likely causes</h2><span class="meta">Spike shape, wind, imagery, past cases</span></div><div class="hyp">${H.map(([n,p])=>`<div class="r"><span>${n}</span><span class="t"><i style="width:${p*100}%"></i></span><span class="tab">${Math.round(p*100)}%</span></div>`).join('')}</div></div>
+        <div class="panel"><div class="ph"><h2>Actions</h2><span class="meta">Every action cites a rule</span></div>
+          <div class="changed"><b>What changed.</b> We asked the site for a gate photo under D1. No reply came by the 21:00 deadline and none was assumed, so D7 adds an inspection and the wheel-wash order.</div>
+          <div class="acols">
+            <div class="acol"><h3>First plan, Wed 18:05</h3>${ini.map(a=>`<div class="ac ${a[0]==='REQUEST_SITE_PHOTO'?'gone':''}"><div class="row"><span class="nm">${a[0].replace(/_/g,"_<wbr>")}</span><span class="pill ${a[3]}">${a[1]}</span></div><div class="why">${esc(a[2])}</div></div>`).join('')}</div>
+            <div class="acol"><h3>Final plan, Wed 21:00</h3>${fin.map(a=>`<div class="ac ${a[4]?'new':''}"><div class="row"><span class="nm">${a[0].replace(/_/g,"_<wbr>")}</span><span class="pill ${a[3]}">${a[1]}</span></div><div class="why">${esc(a[2])}</div>${a[0]==='ADD_TO_INSPECTION'?(ok?`<span class="okline">Approved</span>`:`<div style="display:flex;gap:8px;margin-top:4px"><button class="btn go" data-approve="DT-KE-0142">Approve inspection</button><button class="btn" data-reject="1">Send back</button></div>`):''}</div>`).join('')}</div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+        <div class="panel"><div class="ph"><h2>Evidence</h2></div><ul class="ev">
+          <li><span class="src">Forecast</span><span>P(PM10 &gt; 100) = 0.78 for K-East, 07:00–11:00</span></li>
+          <li><span class="src">Site sensor</span><span>Work-hour PM10 up 3× while PM2.5 stayed flat: coarse dust</span></li>
+          <li><span class="src">Bus 4512</span><span>Gate reading 132 µg/m³ at 06:40, 07:15 and 07:50, matching truck times</span></li>
+          <li><span class="src">Node N-03</span><span>School reading 146 yesterday, same window</span></li>
+          <li><span class="src">Sentinel-2</span><span>Excavation area grew 0.6 ha since October</span></li>
+          <li><span class="src">Past cases</span><span>2 similar cases at this site; wheel wash fixed one</span></li>
+        </ul></div>
+        <div class="panel"><div class="ph"><h2>Verify</h2><span class="meta">School node N-03, PM10</span></div><div style="padding:6px 12px 12px">${verifyChart()}</div></div>
+      </div>
+    </div>`;
+  }
+  function verifyChart(){
+    const W=360,H=170,L=34,B=24,T=10,R=22,hrs=[6,7,8,9,10,11,12];
+    const y1=[90,138,152,146,131,104,86], y2=[82,104,108,99,92,80,74];
+    const x=i=>L+i*(W-L-R)/6, y=v=>T+(H-T-B)*(1-v/180);
+    let s=`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="School node PM10 yesterday versus forecast with actions; the line with actions stays near the 100 standard">`;
+    s+=`<rect x="${x(1)}" y="${T}" width="${x(5)-x(1)}" height="${H-T-B}" fill="var(--dust-tint)"/>`;
+    [0,50,100,150].forEach(t=>s+=`<line x1="${L}" x2="${W-R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${L-6}" y="${y(t)+4}" text-anchor="end">${t}</text>`);
+    s+=`<line x1="${L}" x2="${W-R}" y1="${y(100)}" y2="${y(100)}" stroke="var(--crit)" stroke-dasharray="5 4"/>`;
+    s+=`<path d="M${y1.map((v,i)=>`${x(i)} ${y(v)}`).join(' L')}" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-dasharray="4 3"/>`;
+    s+=`<path d="M${y2.map((v,i)=>`${x(i)} ${y(v)}`).join(' L')}" fill="none" stroke="var(--dust-ink)" stroke-width="2.6"/>`;
+    hrs.forEach((h,i)=>s+=`<text x="${x(i)}" y="${H-6}" text-anchor="middle">${pad(h)}:00</text>`);
+    s+=`<text x="${x(2)+4}" y="${y(152)-6}" style="fill:var(--ink-2)">Yesterday</text><text x="${x(1)+4}" y="${y(30)}" style="fill:var(--dust-ink);font-weight:600">With window + mist (target)</text></svg>`;
+    return s+`<p class="muted" style="margin:6px 4px 0;font-size:12.5px">Shaded: Avoid window. The case closes only if the measured line lands near the target.</p>`;
+  }
+  function vSite(){
+    const k=S.site,s=SITES[k];
+    const reasons={A:['07:00–11:00 Avoid: shallow morning mixing layer; wind carries dust to St. Xavier’s School, 400 m east','13:00–17:00 Go: sea breeze and a deeper mixing layer disperse dust; nothing sensitive downwind']}[k]||['Morning Avoid: plume crosses homes or a school','Afternoon Go: dispersion is good'];
+    const fixes={A:[['Dry excavation','PM10 up 3×, PM2.5 flat during work hours','Spray water; move to 13:00–17:00','Before 07:00'],['Truck track-out','Gate spikes at truck times, bus 4512','Wheel wash, covered loads','Today']],B:[['Demolition without mist','312 µg/m³ for 20 min; relay off','Mist turned on remotely','Done 08:33'],['Uncovered debris','Satellite + 2 resident photos','Cover with green net','Within 2 h']],C:[['Sensor reads too clean','Flat at 24 while bus read 164','Inspect placement and power','Today']],D:[['Uncovered debris','Sentinel-2 + resident photo','Cover; register the site','Within 2 h']],E:[],F:[['Truck track-out','Gate spikes 07:00–09:00','Wheel wash, gate sweeping','Today']]}[k];
+    const checks=[['Flatline or dropout',1],['Matches neighbours',k==='C'?0:1],['Work-hour signature',k==='C'?0:1],['Humidity bias',k==='B'?0:1],['Placement',k==='A'||k==='C'?0:1],['Calibration',1]];
+    const spark=[70,68,66,64,61,59,58,60,62,61,63,64,66,64].map(v=>v+(k==='E'?20:k==='B'?-22:k==='C'?-25:0));
+    const sw=v=>{const W=220,H=48;const mx=100,mn=0;return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-label="Dust Score over 30 days"><path d="M${spark.map((v,i)=>`${(i*(W-6)/13+3).toFixed(1)} ${(H-4-(v-mn)/(mx-mn)*(H-8)).toFixed(1)}`).join(' L')}" fill="none" stroke="var(--dust-ink)" stroke-width="2"/><circle cx="${W-3}" cy="${(H-4-(spark[13])/100*(H-8)).toFixed(1)}" r="3.5" fill="var(--dust-ink)"/></svg>`};
+    const slot=(w,i)=>{const h=6+(i%6)*2;return `<div class="slot s-${w}"><small>${pad(h)}–${pad(h+2)}</small>${w==='avoid'?'Avoid':w==='go'?'Go':'Caution'}</div>`};
+    $('#v-site').innerHTML=`<div class="sh"><div><div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">${Object.keys(SITES).map(x=>`<button class="btn" aria-pressed="${x===k}" data-pick="${x}" style="${x===k?'background:var(--act);color:var(--act-ink);border-color:var(--act)':''}">Site ${x}</button>`).join('')}</div><h1>Site ${k} · ${esc(s.name)}</h1><p class="lede">${esc(s.dev)} · ${s.sensor==='trusted'?`Sensor trusted (${s.trust}/100)`:s.sensor==='untrusted'?`Sensor not trusted (${s.trust}/100)`:'No sensor; found by satellite'}${s.pm!=null?` · PM10 now ${s.pm} µg/m³`:''}</p></div>
+      <div class="score"><div>${sw()}<div class="l">Dust Score, last 30 days</div></div><div><div class="v n">${s.score}</div><div class="l">${s.score>=80?'Good':s.score>=50?'Needs work':'Poor'}</div></div></div></div>
+      <div class="sitegrid">
+        <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <div class="panel"><div class="ph"><h2>Safe-Work Windows</h2><span class="meta">Demolition, excavation, cutting, debris loading</span></div><div class="strip">${s.win.map(slot).join('')}</div><div class="dayl"><span>Tomorrow, Fri 13 Nov</span><span>Sat 14 Nov</span></div><ul class="reasons">${reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>
+          <div class="panel"><div class="ph"><h2>Causes found and fixes sent</h2><span class="meta">From BMC’s 28-point guidelines</span></div><ul class="fixes">${fixes.length?fixes.map((f,i)=>{const id=k+i,ok=S.fixed[id]||/^Done/.test(f[3]);return `<li class="fix ${ok?'ok':''}"><b>${esc(f[0])}</b><span class="due">${ok?'Done':esc(f[3])}</span><span class="h">Detected: ${esc(f[1])}</span>${ok?'<span></span>':`<button class="btn" data-fix="${id}">Mark done</button>`}<span class="h"><b style="font-size:12.5px">Fix:</b> ${esc(f[2])}</span></li>`}).join(''):'<li class="muted">No open causes. This site is following its plan.</li>'}</ul></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <div class="panel"><div class="ph"><h2>Capture and clean</h2></div><div class="ctrl">
+            <div class="cr"><div><b>Mist curtain</b><div class="h">${S.mist[k]==='auto'?'On 05:30–11:00 from the forecast':S.mist[k]==='on'?'Running now':'Off'}</div></div><div class="seg" role="group" aria-label="Mist curtain">${['auto','on','off'].map(m=>`<button aria-pressed="${S.mist[k]===m}" data-mist="${m}">${m==='auto'?'Auto':m==='on'?'On':'Off'}</button>`).join('')}</div></div>
+            <div class="cr"><div><b>Green screens on hoardings</b><div class="h">North and east faces done; west face pending</div></div><span class="pill p-act">2 of 3</span></div>
+            <div class="cr"><div><b>Downwind school</b><div class="h">St. Xavier’s, 400 m · node N-03 reads 146</div></div><span class="pill p-info">Alerted</span></div>
+          </div></div>
+          <div class="panel"><div class="ph"><h2>Dust Score breakdown</h2><span class="meta">Weights 30, 25, 20, 15, 10</span></div><div class="hyp">${[['Sensor trust',s.trust||0],['Spikes traced here',Math.max(10,s.score-16)],['Windows followed',Math.min(95,s.score-9)],['Resident reports',Math.min(95,s.score+6)],['Inspections',Math.min(95,s.score+8)]].map(([n,v])=>`<div class="r"><span>${n}</span><span class="t"><i style="width:${v}%;background:var(--dust)"></i></span><span class="tab">${v}</span></div>`).join('')}</div></div>
+          <div class="panel"><div class="ph"><h2>Sensor audit</h2><span class="meta">Six checks, daily</span></div><div class="checks">${checks.map(([n,v])=>`<div><span>${n}</span><span class="${s.sensor==='none'?'muted':v?'pass':'fail'}">${s.sensor==='none'?'No sensor':v?'Pass':'Fail'}</span></div>`).join('')}</div></div>
+        </div>
+      </div>`;
+  }
+  function pmColor(v){return v<60?'var(--c1)':v<80?'var(--c2)':v<100?'var(--c3)':v<130?'var(--c4)':v<160?'var(--c5)':'var(--c6)'}
+  function vForecast(){
+    const base={ 'K-East':1.18,'K-West':.92,'P-North':1.08,'L':1.0,'H-East':.88,'M-East':1.12,'S':.95,'G-North':.84};
+    let cells='<div></div>';for(let i=0;i<24;i++){const hr=(9+i*3)%24;cells+=`<div class="h">${hr===9?['Thu','Fri','Sat'][Math.floor((9+i*3)/24)]+' 09':i%2===0?pad(hr):''}</div>`}
+    const peaks=[];
+    WARDS.forEach(w=>{cells+=`<div class="w ${w==='K-East'?'me':''}">${w}</div>`;let pk=[0,0];
+      for(let i=0;i<24;i++){const t=9+i*3,hod=t%24,day=Math.floor(t/24);const m=Math.exp(-Math.pow((hod-9)/2.8,2)),n=Math.exp(-Math.pow((hod-22)/2.5,2))*.5;const v=(62+(day===1?30:12)+ (day===1?70:35)*m+25*n)*base[w];if(v>pk[0])pk=[v,i];cells+=`<div class="c" style="background:${pmColor(v)}" title="${w}, ${['Thu','Fri','Sat','Sun'][day]} ${pad(hod)}:00 · ${Math.round(v)} µg/m³"></div>`}
+      peaks.push([w,pk[0],pk[1]])});
+    peaks.sort((a,b)=>b[1]-a[1]);
+    $('#v-forecast').innerHTML=`<div><h1>Forecast, next 72 hours</h1><p class="lede">Predicted PM10 by ward, every 3 hours. Friday morning is the worst window this week, so Safe-Work Windows and misting are already scheduled for it.</p></div>
+    <div class="fc2">
+      <div class="panel"><div class="ph"><h2>PM10 by ward</h2><span class="meta">Thu 09:00 to Sun 06:00</span></div><div class="fgrid">${cells}</div>
+        <div class="ramp"><span>µg/m³</span><i style="background:var(--c1)"></i>under 60<i style="background:var(--c2)"></i>60–80<i style="background:var(--c3)"></i>80–100<i style="background:var(--c4)"></i>100–130<i style="background:var(--c5)"></i>130–160<i style="background:var(--c6)"></i>over 160 <span class="muted" style="margin-left:8px">National 24-hour standard: 100</span></div></div>
+      <div class="panel"><div class="ph"><h2>Where to act first</h2></div><div class="tw"><table class="tbl"><thead><tr><th>Ward</th><th>Peak</th><th>When</th><th>Sites to reschedule</th></tr></thead><tbody>${peaks.slice(0,7).map(([w,v,i],j)=>{const t=9+i*3;return `<tr><td><b>${w}</b></td><td class="tab">${Math.round(v)}</td><td class="tab">${['Thu','Fri','Sat','Sun'][Math.floor(t/24)]} ${pad(t%24)}:00</td><td class="tab">${[12,10,9,7,6,4,3][j]}</td></tr>`}).join('')}</tbody></table></div>
+      <p class="muted" style="margin:0 16px 14px;font-size:12.5px">Model: gradient-boosted forecast per station on 2022–26 history, wind, mixing height and upwind site activity. Baselines to beat: persistence and SAFAR.</p></div>
+    </div>`;
+  }
+  function vSensors(){
+    const rows=[['Site A sensor','Site sensor','Metro Line 7A',118,82],['Site B sensor','Site sensor','Chakala demolition',312,71],['Site C sensor','Site sensor','Marol redevelopment',24,28],['Site F sensor','Site sensor','Sahar Rd widening',96,77],['N-03','Fixed node',"St. Xavier's School",146,94],['N-07','Fixed node','Marol municipal school',92,90],['N-12','Fixed node','Sunshine CHS',88,92],['BEST 4520','Bus node','Route past Sites C and D',164,88],['BEST 4512','Bus node','Route past Site A gate',132,86]];
+    const tc=v=>v>=70?'var(--ok)':v>=40?'var(--dust)':'var(--crit)';
+    $('#v-sensors').innerHTML=`<div><h1>Sensors and buses</h1><p class="lede">BMC site sensors, our fixed DustTrace Nodes at schools and societies, and nodes on BEST buses. Each one gets a daily trust score; a sensor that disagrees with its neighbours is flagged.</p></div>
+    <div class="stats"><div class="stat"><span class="v n">31</span><span class="d">BMC site sensors in K-East</span></div><div class="stat"><span class="v n">18</span><span class="d">fixed DustTrace Nodes</span></div><div class="stat"><span class="v n">46</span><span class="d">BEST buses carrying nodes</span></div><div class="stat risk"><span class="v n">7</span><span class="d">sensors flagged as not trusted</span></div></div>
+    <div class="sg">
+      <div class="panel"><div class="ph"><h2>Sensor health</h2><span class="meta">Trust score, 0–100</span></div><div class="tw"><table class="tbl"><thead><tr><th>Sensor</th><th>Type</th><th>Where</th><th>PM10 now</th><th>Trust</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${esc(r[2])}</td><td class="tab">${r[3]}</td><td><span class="trust"><span class="t"><i style="width:${r[4]}%;background:${tc(r[4])}"></i></span><span class="tab">${r[4]}</span>${r[4]<40?'<span class="pill p-crit">Flagged</span>':''}</span></td></tr>`).join('')}</tbody></table></div></div>
+      <div class="panel"><div class="ph"><h2>Bus readings along the route</h2><span class="meta">Last 60 minutes</span></div><div style="padding:8px 12px 4px">${busMap()}</div><p class="muted" style="margin:0 16px 14px;font-size:12.5px">Only readings within 150 m of a site gate count toward that site. Each is compared with the same road stretch on other days, because traffic dominates raw bus readings.</p></div>
+    </div>`;
+  }
+  function busMap(){
+    let s=`<svg class="mapsvg" viewBox="0 0 900 540" role="img" aria-label="BEST bus route with dust readings along it; readings are highest near Sites C and D"><rect width="900" height="540" rx="10" fill="var(--map)"/><path d="M40 60 L380 28 L820 70 L870 300 L800 510 L300 520 L60 470 Z" fill="var(--map-land)" stroke="var(--ink-3)" stroke-width="1.2" stroke-dasharray="7 6"/>
+      <path d="M250 20 C 255 140, 262 300, 270 535" stroke="var(--road)" stroke-width="14" fill="none"/><path d="M20 215 C 200 225, 420 190, 890 165" stroke="var(--road)" stroke-width="11" fill="none"/>
+      <path id="rt" d="${ROUTE}" stroke="var(--info)" stroke-width="4" fill="none" opacity=".5"/>`;
+    Object.entries(SITES).forEach(([k,v])=>{s+=`<g><circle cx="${v.x}" cy="${v.y}" r="13" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/><text x="${v.x}" y="${v.y+5}" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">${k}</text></g>`});
+    return s+`<g id="bdots"></g></svg>`;
+  }
+  function placeBusDots(){const svg=document.querySelector('#v-sensors .mapsvg');if(!svg)return;const p=svg.querySelector('#rt');const L=p.getTotalLength();let g='';
+    for(let i=0;i<=60;i++){const pt=p.getPointAtLength(L*i/60);let v=70;Object.values(SITES).forEach(st=>{const d=Math.hypot(st.x-pt.x,st.y-pt.y);v+=Math.max(0,1-d/120)*(st.crit?150:st.sensor==='untrusted'?120:st.sensor==='none'?110:60)});g+=`<circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="7" fill="${pmColor(v)}" stroke="var(--panel)" stroke-width="1.5"><title>${Math.round(v)} µg/m³</title></circle>`}
+    svg.querySelector('#bdots').innerHTML=g+`<g transform="translate(40 500)"><circle r="7" cx="0" cy="-4" fill="var(--c2)"/><text x="12" y="0" font-size="12" fill="var(--ink-2)">60–80</text><circle r="7" cx="80" cy="-4" fill="var(--c4)"/><text x="92" y="0" font-size="12" fill="var(--ink-2)">100–130</text><circle r="7" cx="172" cy="-4" fill="var(--c6)"/><text x="184" y="0" font-size="12" fill="var(--ink-2)">over 160 µg/m³</text></g>`}
+  function vResident(){
+    $('#v-resident').innerHTML=`<div class="phone">
+      <div class="panel"><div class="muted" style="font-size:13px">Construction site 180 m from you</div><h1 style="font-size:26px;margin:4px 0 10px">Site D · Debris yard</h1><div style="display:flex;align-items:flex-end;gap:14px"><span class="big n" style="color:var(--dust-ink)">45</span><div><b>Dust Score out of 100</b><div class="muted" style="font-size:13.5px">Needs work. One fix is pending: cover the debris within 2 hours.</div></div></div></div>
+      <div class="panel"><div class="muted" style="font-size:13px">Air at your building</div><div style="display:flex;align-items:flex-end;gap:14px;margin-top:6px"><span class="big n" style="color:var(--crit)">92</span><div><b>PM10 µg/m³ now</b><div class="muted" style="font-size:13.5px">From the DustTrace Node at Sunshine CHS. Tomorrow 07:00–11:00 will cross 100: keep windows shut.</div></div></div></div>
+      <form class="panel" id="report" novalidate><h1 style="font-size:24px;margin:0">Report dust</h1><div class="muted" style="font-size:13.5px;margin-top:4px">You scanned Site D’s LED board. The site never sees your name.</div>
+        <div class="cats" role="group" aria-label="What did you see">${['Uncovered debris','Dust cloud','No water spraying','Truck spilling','Night work'].map(c=>`<button type="button" class="cat" aria-pressed="${S.cat===c}" data-cat="${c}">${c}</button>`).join('')}</div>
+        <label for="photo">Photo</label><input type="file" id="photo" accept="image/*">
+        <label for="note">Note</label><textarea id="note" rows="3" placeholder="Pile near the east gate, no net since morning"></textarea>
+        <button class="send" type="submit">Send report</button>${S.sent?`<div class="okbox"><b>Report KE-2231 sent.</b> An officer reviews it within 24 hours. You’ll see the outcome here.</div>`:''}</form></div>`;
+  }
+
+
+  function didChart(){
+    const W=760,H=232,L=44,R=20,T=16,B=30;
+    const ke=[148,152,145,150,147,138,131,128,124,129,125];   // K-East, weeks -4..+6
+    const cw=[146,149,147,151,148,149,146,150,147,151,148];   // control wards
+    const n=ke.length,x=i=>L+i*(W-L-R)/(n-1),y=v=>T+(H-T-B)*(1-(v-100)/60);
+    let s=`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Weekly PM10 on high-risk days: K-East falls after the pilot starts while control wards stay flat">`;
+    s+=`<rect x="${x(4)}" y="${T}" width="${x(n-1)-x(4)}" height="${H-T-B}" fill="rgba(224,162,69,.06)"/>`;
+    [100,120,140,160].forEach(t=>s+=`<line x1="${L}" x2="${W-R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${L-8}" y="${y(t)+4}" text-anchor="end">${t}</text>`);
+    s+=`<line x1="${x(4)}" x2="${x(4)}" y1="${T}" y2="${H-B}" stroke="var(--ink-3)" stroke-dasharray="4 4"/><text x="${x(4)+8}" y="${T+14}" style="fill:var(--ink-2)">Pilot starts</text>`;
+    const path=a=>'M'+a.map((v,i)=>`${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' L');
+    s+=`<path d="${path(ke)} L${x(n-1)} ${H-B} L${x(0)} ${H-B}Z" fill="url(#gk)" opacity=".5"/><defs><linearGradient id="gk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--dust)" stop-opacity=".35"/><stop offset="1" stop-color="var(--dust)" stop-opacity="0"/></linearGradient></defs>`;
+    s+=`<path d="${path(cw)}" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-dasharray="5 4"/>`;
+    s+=`<path d="${path(ke)}" fill="none" stroke="var(--dust)" stroke-width="3"/>`;
+    s+=`<circle cx="${x(n-1)}" cy="${y(ke[n-1])}" r="5" fill="var(--dust)"/><circle cx="${x(n-1)}" cy="${y(cw[n-1])}" r="4" fill="var(--ink-3)"/>`;
+    s+=`<text x="${x(n-1)-8}" y="${y(ke[n-1])+22}" text-anchor="end" style="fill:var(--dust-ink);font-weight:600">K-East 125</text><text x="${x(n-1)-8}" y="${y(cw[n-1])-14}" text-anchor="end" style="fill:var(--ink-2)">Control wards 148</text>`;
+    ['−4','−3','−2','−1','1','2','3','4','5','6'].forEach((w,i)=>{});
+    for(let i=0;i<n;i++){const w=i-4;s+=`<text x="${x(i)}" y="${H-12}" text-anchor="middle">${w<0?'W'+w:'W+'+w}</text>`}
+    return s+'</svg>';
+  }
+  function vImpact(){
+    const closed=[['Verified by a PM drop',23,'var(--ok)'],['Still verifying',6,'var(--dust)'],['Referred to MPCB',3,'var(--info)'],['Closed without proof',0,'var(--crit)']];
+    const fc=[['DustTrace forecast',0.74,'var(--dust)'],['SAFAR baseline',0.63,'var(--ink-3)'],['Persistence',0.58,'var(--ink-3)']];
+    const mv=[['A','Metro Line 7A excavation',52,64,'Followed 9 of 10 windows; wheel wash fitted'],['F','Road widening, Sahar Rd',49,58,'Gate sweeping after truck spikes'],['D','Debris yard (unregistered)',31,45,'Registered after satellite find; debris covered'],];
+    $('#v-impact').innerHTML=`<div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap"><div><h1>Did it work? K-East pilot, weeks 1–6</h1><p class="lede">We compare K-East with two control wards that don’t use DustTrace. A case only closes when the air measurably improves.</p></div><span class="pill p-act" style="margin-left:auto">Simulated pilot · demo data</span></div>
+    <div class="stats">
+      <div class="stat"><span class="v n" style="color:var(--ok)">−11%</span><span class="d">PM10 on high-risk days, versus control wards</span></div>
+      <div class="stat"><span class="v n">2.1×</span><span class="d">violations found per inspection (0.9 before)</span></div>
+      <div class="stat"><span class="v n" style="color:var(--ok)">−24%</span><span class="d">people downwind of dusty work, from Safe-Work Windows</span></div>
+      <div class="stat"><span class="v n">17/20</span><span class="d">flagged sensors confirmed faulty in the field</span></div>
+    </div>
+    <div class="im">
+      <div class="panel"><div class="ph"><h2>PM10 on high-risk days, weekly average</h2><span class="meta">µg/m³ · difference-in-differences</span></div><div style="padding:8px 12px 4px">${didChart()}</div><p class="note">K-East falls by about 16 µg/m³ after the pilot starts while the control wards stay flat, with weather matched week by week.</p></div>
+      <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+        <div class="panel"><div class="ph"><h2>How cases closed</h2><span class="meta">32 cases</span></div><div class="bars">${closed.map(([n,v,c])=>`<div class="r"><span>${n}</span><span class="t"><i style="width:${v/23*100}%;background:${c}"></i></span><span class="tab">${v}</span></div>`).join('')}</div><p class="note">Rule D10: no case closes on a promise. It needs a measured drop at the nearest node.</p></div>
+        <div class="panel"><div class="ph"><h2>Forecast skill, PM10 &gt; 100</h2><span class="meta">F1 score, next 24 h</span></div><div class="bars">${fc.map(([n,v,c])=>`<div class="r"><span>${n}</span><span class="t"><i style="width:${v*100}%;background:${c}"></i></span><span class="tab">${v.toFixed(2)}</span></div>`).join('')}</div></div>
+      </div>
+    </div>
+    <div class="panel"><div class="ph"><h2>Dust Score movers</h2><span class="meta">Six weeks</span></div><div class="tw"><table class="tbl mv"><thead><tr><th>Site</th><th>Name</th><th>Before</th><th>Now</th><th>What changed</th></tr></thead><tbody>${mv.map(r=>`<tr data-site="${r[0]}"><td><b>${r[0]}</b></td><td>${esc(r[1])}</td><td class="tab">${r[2]}</td><td class="tab"><span class="${r[3]>r[2]?'up':''}">${r[3]}${r[3]>r[2]?' ▲ '+(r[3]-r[2]):''}</span></td><td class="muted">${esc(r[4])}</td></tr>`).join('')}</tbody></table></div></div>`;
+  }
+  function vManager(){
+    const s=SITES.A, ok=S.accepted, ph=S.photo;
+    const slot=(w,i)=>{const h=6+i*2;return `<div class="slot s-${w}"><small>${pad(h)}–${pad(h+2)}</small>${w==='avoid'?'Avoid':w==='go'?'Go':'Caution'}</div>`};
+    $('#v-manager').innerHTML=`<div class="phone">
+      <div class="notif"><span class="ic"><svg width="22" height="22" viewBox="0 0 30 30" aria-hidden="true"><circle cx="15" cy="15" r="13" fill="none" stroke="#E0A245" stroke-width="2"/><circle cx="11" cy="11" r="2" fill="#E0A245"/><circle cx="17" cy="9" r="1.5" fill="#E0A245"/></svg></span><span class="t1"><span>DustTrace · BMC K-East</span><span>Wed 18:05</span></span><span class="t2">Tomorrow 07:00–11:00 is an Avoid window for Site A.</span></div>
+      <div class="panel"><div class="muted" style="font-size:13px">Site manager · MMRDA contractor</div><h1 style="font-size:26px;margin:4px 0 2px">Site A · Metro Line 7A</h1>
+        <div style="display:flex;align-items:flex-end;gap:14px;margin-top:8px"><span class="big n" style="color:var(--dust-ink)">64</span><div><b>Dust Score</b><div class="muted" style="font-size:13.5px">Follow tomorrow’s windows to reach 68. Scores show on your LED board.</div></div></div></div>
+      <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:16px">Tomorrow’s plan, Fri 13 Nov</b><span class="pill ${ok?'p-ok':'p-act'}">${ok?'Accepted':'New'}</span></div>
+        <div class="mini">${s.win.slice(0,6).map(slot).join('')}</div>
+        <div class="muted" style="font-size:13.5px;margin-top:6px">Wind carries dust to St. Xavier’s School until 11:00. Move excavation and debris loading to <b style="color:var(--ink)">13:00–17:00</b>. Mist curtain runs 05:30–11:00 automatically.</div>
+        ${ok?`<div class="okbox"><b>Plan accepted.</b> Your crew schedule is updated. We’ll check the school node at 11:00.</div>`:`<div class="row2"><button class="btn go" data-accept="1">Accept plan</button><button class="btn" data-review="1">Ask for review</button></div>`}</div>
+      <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:16px">Gate photo requested</b><span class="pill ${ph?'p-ok':'p-act'}">${ph?'Sent':'Reply by 21:00'}</span></div>
+        <div class="muted" style="font-size:13.5px;margin-top:6px">Bus 4512 saw dust spikes at your gate at truck times. Send a photo of the wheel-wash area. If nothing arrives, an inspection is added (rule D7).</div>
+        ${ph?`<div class="okbox"><b>Photo received 19:42.</b> The agent will review it with tonight’s readings.</div>`:`<div class="row2"><button class="btn go" data-photo="1">Upload photo</button></div>`}</div>
+      <div class="panel"><div class="kv"><span>Mist curtain</span><b style="color:var(--ok)">Auto · 05:30–11:00</b></div><div class="kv"><span>Site sensor trust</span><b>82 / 100</b></div><div class="kv"><span>Open fixes</span><b>2</b></div></div>
+    </div>`;
+  }
+  // ---------------- routing + events ----------------
+  const RENDER={overview:vOverview,cases:vCases,case:vCase,site:vSite,forecast:vForecast,sensors:vSensors,resident:vResident,impact:vImpact,manager:vManager};
+  function go(v){S.view=v;document.body.dataset.view=v;Object.keys(RENDER).forEach(k=>$('#v-'+k).hidden=k!==v);RENDER[v]();if(v==='sensors')placeBusDots();
+    document.querySelectorAll('.nav').forEach(n=>n.setAttribute('aria-current',(n.dataset.go===v||(v==='case'&&n.dataset.go==='cases'))?'page':'false'));
+    try{history.replaceState(null,'','#'+v)}catch(e){} window.scrollTo(0,0)}
+  function refreshMap(){$('#mapbox').innerHTML=mapSVG(S.hour);$('#hl').textContent=pad(S.hour)+':00';placeBuses();
+    const st=document.querySelectorAll('#v-overview .stat .v')[1];if(st)st.textContent=Object.keys(SITES).filter(k=>slotAt(k,S.hour)==='avoid').length*2;
+    const d=document.querySelectorAll('#v-overview .stat .d')[1];if(d)d.textContent='sites in an Avoid window at '+pad(S.hour)+':00'}
+  document.addEventListener('click',e=>{const t=e.target.closest('[data-go],[data-alert],[data-site],[data-case],[data-approve],[data-reject],[data-pick],[data-mist],[data-fix],[data-cat],[data-accept],[data-review],[data-photo],#play');if(!t)return;
+    if(t.id==='play'){if(S.playing){clearInterval(S.playing);S.playing=null;return}S.hour=6;refreshMap();$('#hour').value=6;S.playing=setInterval(()=>{S.hour++;if(S.hour>18){clearInterval(S.playing);S.playing=null;S.hour=18}$('#hour').value=S.hour;refreshMap()},700);return}
+    if(t.dataset.go){go(t.dataset.go);return}
+    if(t.dataset.alert){const a=ALERTS.find(x=>x.id==t.dataset.alert);S.handled[a.id]=true;vOverview();toast(a.done);return}
+    if(t.dataset.site){S.site=t.dataset.site;go('site');return}
+    if(t.dataset.case){go('case');return}
+    if(t.dataset.approve){S.approved[t.dataset.approve]=true;vCase();$('#casecount').textContent='2';toast('Inspection approved and added to tomorrow’s route');return}
+    if(t.dataset.reject){toast('Sent back to the agent with your note');return}
+    if(t.dataset.pick){S.site=t.dataset.pick;vSite();return}
+    if(t.dataset.mist){S.mist[S.site]=t.dataset.mist;vSite();toast('Mist curtain set to '+t.textContent);return}
+    if(t.dataset.fix){S.fixed[t.dataset.fix]=true;vSite();toast('Fix marked done');return}
+    if(t.dataset.accept){S.accepted=true;vManager();toast('Plan accepted');return}
+    if(t.dataset.review){toast('Review requested from the ward office');return}
+    if(t.dataset.photo){S.photo=true;vManager();toast('Photo sent');return}
+    if(t.dataset.cat){S.cat=t.dataset.cat;document.querySelectorAll('.cat').forEach(c=>c.setAttribute('aria-pressed',c.dataset.cat===S.cat));return}
+  });
+  document.addEventListener('keydown',e=>{const g=e.target.closest&&e.target.closest('.sitept');if(g&&(e.key==='Enter'||e.key===' ')){e.preventDefault();S.site=g.dataset.site;go('site')}});
+  document.addEventListener('click',e=>{const g=e.target.closest('.sitept');if(g){S.site=g.dataset.site;go('site')}});
+  document.addEventListener('input',e=>{if(e.target.id==='hour'){S.hour=+e.target.value;refreshMap()}});
+  document.addEventListener('submit',e=>{if(e.target.id!=='report')return;e.preventDefault();S.sent=true;vResident();toast('Report sent')});
+
+  const h=(location.hash||'').slice(1);
+  go(RENDER[h]?h:'overview');
+})();
+</script>

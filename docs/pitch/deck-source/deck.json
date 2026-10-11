@@ -1,0 +1,67 @@
+{
+  "v": 4,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-09-29T16:45:00Z"
+  },
+  "title": "DustTrace — Round 1 Pitch",
+  "cover": "cover",
+  "order": [
+    "cover",
+    "brief",
+    "problem",
+    "gaps",
+    "idea",
+    "solution",
+    "nodes",
+    "safewindows",
+    "prevent",
+    "agent",
+    "dustscore",
+    "dashboard",
+    "manager",
+    "economics",
+    "impact",
+    "close",
+    "timeline",
+    "data",
+    "flow",
+    "forecast",
+    "compare",
+    "scale",
+    "website"
+  ],
+  "sections": {
+    "s1": {
+      "description": "Who we are and the one-line pitch",
+      "start": "cover"
+    },
+    "s2": {
+      "description": "The Theme 2 problem statement, and why we chose construction dust",
+      "start": "brief"
+    },
+    "s3": {
+      "description": "Our solution: monitor, predict, prevent and prove, with our own sensors where none exist",
+      "start": "idea"
+    },
+    "s4": {
+      "description": "Web prototype: ward console and site manager app",
+      "start": "dashboard"
+    },
+    "s5": {
+      "description": "Economics, measurable impact and close",
+      "start": "economics"
+    },
+    "s6": {
+      "description": "Appendix: backup slides for Q&A",
+      "start": "timeline"
+    }
+  },
+  "faces": {
+    "manrope": {
+      "family": "Manrope",
+      "href": "https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap"
+    }
+  },
+  "designSystems": []
+}
