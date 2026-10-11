@@ -68,10 +68,18 @@ Overpass (schools, hosp.) ─┘                                (LightGBM + Gaus
 
 ### Live vs synthetic (important)
 
-The build sandbox could not reach Open-Meteo, OpenAQ or Overpass, so **the live code paths are written and parser-tested against fixtures but have never run against the real APIs**.
-- In `--mode auto`, a failing source falls back to synthetic data. Those rows are flagged `synthetic=true`, and the run's `data_mode` becomes `synthetic` or `mixed`.
-- The console shows an amber banner and pill whenever the data isn't live.
-- Seed stations, the six sites (A–F) and the ten receptors in `data/seed/k-east.json` are **approximate demo positions**. Replace the stations with the real OpenAQ locations; `ingest` does this automatically when it finds them in the bbox. Replace the receptors with `dusttrace osm`.
+First live runs (Oct 11, 2026, from GitHub Actions and the build sandbox):
+- **Open-Meteo works.** The forecast and archive APIs both returned real weather from Actions. Both can time out or rate-limit (429), so requests retry (`sources/http.py`).
+- **OpenAQ works, but its CPCB feed is stale.** It lists 12 PM stations that reported in the last 30 days around K-East, including Chakala-Andheri East (inside the ward), CSIA Airport T2, Kurla and Powai, with hourly history back to Aug 2025. Every CPCB station's newest reading is **2026-10-07 14:30 UTC**; only the US AirNow monitor (PM2.5 only) is current.
+  - OpenAQ returns 500s for long ranges, so history is fetched in 30-day windows. The free key allows 60 requests a minute; a 420-day backfill takes about 6 minutes.
+- **Freshness rule (`pipeline.anchor`, `FRESH_HOURS = 6`):** real stations anchor the forecast only while their newest reading is under 6 h old. Otherwise the seed stations' synthetic readings anchor it, so a stalled feed can't push the 48 h forecast into the past, and the run is `mixed`. The switch to real stations is automatic once OpenAQ catches up.
+- The hourly job loads 3 days. After an outage longer than that, run the workflow by hand with more `days` to fill the gap.
+- Overpass (`dusttrace osm`) has still never run against the real API.
+
+How fallback works:
+- In `--mode auto`, a failing source falls back to synthetic data. Those rows are flagged `synthetic=true`, and the run's `data_mode` becomes `synthetic` or `mixed`. Synthetic rows never overwrite real ones (guarded in `db.py`).
+- The console shows an amber banner and pill whenever the data isn't live. The map and the observed line show only the stations the latest run used.
+- Seed stations, the six sites (A–F) and the ten receptors in `data/seed/k-east.json` are **approximate demo positions**. Real OpenAQ stations are stored next to the seed ones and replace them in runs while fresh. Replace the receptors with `dusttrace osm`.
 
 Latest synthetic run (420 days of history):
 - Mean error: 3.5 µg/m³ vs 8.9 for persistence.
@@ -109,7 +117,7 @@ Use at least 420 days of history. With 120 days the holdout crosses a season cha
    - Add the repo secrets `DATABASE_URL` (that URI) and `OPENAQ_API_KEY`.
    - Trigger the "Hourly forecast" workflow once by hand with `days=420` to backfill. From then on it runs at :17 every hour.
    - The workflow only runs `ingest` and `run`. Apply any new migration with `python -m dusttrace init-db` (all migrations are safe to re-run) or the Supabase MCP, and give every new table `enable row level security`.
-2. **Verify live data:** check the run's `data_mode` is `live`, the stations are real CPCB sites in or near K-East, and `dusttrace osm` loads real schools and hospitals. Fix any parser drift.
+2. **Verify live data:** weather and OpenAQ station history are verified (see above). Still to do: watch for OpenAQ's CPCB feed to resume and the run's `data_mode` to turn `live`; if it stays stale, add CPCB's own real-time feed (data.gov.in) as a second source. Then run `dusttrace osm` for real schools and hospitals.
 3. **Deploy the console** on Vercel, root `apps/web`, env `DATABASE_URL`. Add a basic password, because ward data is sensitive.
 4. **Calibrate:** compare plume increments with station deltas downwind of real sites, tune the emission factors, and reach about 80% coverage for the quantile band.
 5. **Agent cases (PRD D1–D10):** the inspection case builder ranks sites, checks the sensor, satellite and bus evidence, proposes actions, and needs an officer's sign-off.

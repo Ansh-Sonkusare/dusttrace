@@ -64,14 +64,15 @@ export async function getStationPeaks(runId: number) {
   );
 }
 
-export async function getObserved(issuedAt: string, hours = 48): Promise<ObsPoint[]> {
+// `stationIds` are the stations the run used (run.metrics.stations), so the observed line matches the forecast.
+export async function getObserved(issuedAt: string, stationIds: string[] | undefined, hours = 48): Promise<ObsPoint[]> {
   const r = await q<ObsPoint>(
     `select date_trunc('hour', r.ts) as ts, avg(r.pm10)::real as pm10
        from readings r join stations s on s.id = r.station_id
       where s.ward_id=$1 and r.ts > $2::timestamptz - make_interval(hours => $3) and r.ts <= $2::timestamptz
-        and r.pm10 is not null
+        and r.pm10 is not null and ($4::text[] is null or r.station_id = any($4))
       group by 1 order by 1`,
-    [WARD, issuedAt, hours],
+    [WARD, issuedAt, hours, stationIds ?? null],
   );
   return r.map((p) => ({ ...p, ts: iso(p.ts) }));
 }
@@ -89,8 +90,11 @@ export async function getReceptors(): Promise<Receptor[]> {
   return q<Receptor>("select id, name, kind, lat, lon, population, source from receptors where ward_id=$1", [WARD]);
 }
 
-export async function getStations(): Promise<Station[]> {
-  return q<Station>("select id, name, source, lat, lon from stations where ward_id=$1", [WARD]);
+export async function getStations(ids?: string[]): Promise<Station[]> {
+  return q<Station>(
+    "select id, name, source, lat, lon from stations where ward_id=$1 and ($2::text[] is null or id = any($2))",
+    [WARD, ids ?? null],
+  );
 }
 
 export async function getWindows(runId: number, siteId?: string): Promise<WindowRow[]> {

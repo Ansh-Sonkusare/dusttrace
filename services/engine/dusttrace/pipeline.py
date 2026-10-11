@@ -13,6 +13,9 @@ from .sources import openaq, openmeteo, overpass, synthetic
 
 log = logging.getLogger("dusttrace")
 
+# Real readings older than this can't anchor a forecast for the next 48 h; synthetic samples stand in.
+FRESH_HOURS = 6
+
 
 def now_hour() -> pd.Timestamp:
     return pd.Timestamp.now(tz="UTC").floor("h")
@@ -26,57 +29,80 @@ def ingest(conn, settings: Settings, mode: str = "auto", days: int = 120) -> dic
     report = {"weather": None, "readings": None}
 
     # Weather
-    wx, wx_live = None, False
+    wx, wx_live, gap = None, False, None
     if mode in ("auto", "live"):
         try:
             past = min(days, 92)
             wx = openmeteo.fetch_forecast(ward["center_lat"], ward["center_lon"], past_days=past, forecast_days=3)
-            if days > 92:
-                start = (now - timedelta(days=days)).date()
-                end = (now - timedelta(days=90)).date()
-                hist = openmeteo.fetch_archive(ward["center_lat"], ward["center_lon"], start, end)
-                wx = pd.concat([hist, wx]).drop_duplicates("ts", keep="last").sort_values("ts")
-            wx_live = True
+            wx_live = not wx.empty
         except Exception as e:  # network blocked, API down, etc.
             if mode == "live":
                 raise
             log.warning("Open-Meteo unavailable (%s); using synthetic weather", e)
-    if wx is None or wx.empty:
+        if wx_live and days > 92:
+            start = (now - timedelta(days=days)).date()
+            end = (now - timedelta(days=90)).date()
+            try:
+                hist = openmeteo.fetch_archive(ward["center_lat"], ward["center_lon"], start, end)
+                wx = pd.concat([hist, wx]).drop_duplicates("ts", keep="last").sort_values("ts")
+            except Exception as e:  # keep the live recent weather; only the older history is synthetic
+                if mode == "live":
+                    raise
+                log.warning("Open-Meteo archive unavailable (%s); weather before %s is synthetic", e, wx["ts"].min())
+                gap = synthetic.weather(now - timedelta(days=days), wx["ts"].min() - timedelta(hours=1))
+    if not wx_live:
         wx = synthetic.weather(now - timedelta(days=days), now + timedelta(hours=72))
     n = db.write_weather(conn, ward["id"], wx, now, synthetic=not wx_live)
-    report["weather"] = {"rows": n, "live": wx_live}
+    if gap is not None:
+        n += db.write_weather(conn, ward["id"], gap, now, synthetic=True)
+        wx = pd.concat([gap, wx]).sort_values("ts")
+    report["weather"] = {"rows": n, "live": wx_live, "history_live": wx_live and gap is None}
 
     # Readings
     rd_live = False
     total = 0
+    latest = None  # newest real PM10 hour
     if mode in ("auto", "live") and settings.openaq_api_key:
         try:
-            stations = openaq.find_stations(settings.openaq_api_key, _expand(ward["bbox"], 0.04))
+            stations = openaq.find_stations(settings.openaq_api_key, _expand(ward["bbox"], 0.04),
+                                            active_since=(now - timedelta(days=30)).to_pydatetime())
+            log.info("OpenAQ: %d PM stations near the ward reported in the last 30 days", len(stations))
             for st in stations:
-                db.upsert_station(conn, {**st, "source": "openaq"}, ward["id"])
-                frames = {}
-                for param, sensor_id in st["sensors"].items():
-                    df = openaq.fetch_sensor_hours(settings.openaq_api_key, sensor_id,
-                                                   (now - timedelta(days=days)).to_pydatetime(), now.to_pydatetime())
-                    frames[param] = df.set_index("ts")["value"]
-                if not frames:
+                try:  # one bad station shouldn't cost us the others
+                    frames = {}
+                    for param, sensor_id in st["sensors"].items():
+                        df = openaq.fetch_sensor_hours(settings.openaq_api_key, sensor_id,
+                                                       (now - timedelta(days=days)).to_pydatetime(), now.to_pydatetime())
+                        frames[param] = df.set_index("ts")["value"]
+                except Exception as e:
+                    log.warning("OpenAQ station %s skipped (%s)", st["id"], e)
                     continue
                 merged = pd.DataFrame({"pm10": frames.get("pm10"), "pm25": frames.get("pm25")})
                 merged = merged.reset_index().rename(columns={"index": "ts"})
+                if merged.empty:
+                    continue
                 merged["station_id"] = st["id"]
+                db.upsert_station(conn, {**st, "source": "openaq"}, ward["id"])
                 total += db.write_readings(conn, merged, synthetic=False)
-            rd_live = total > 0
+                last = merged.loc[merged["pm10"].notna(), "ts"].max()
+                if pd.notna(last) and (latest is None or last > latest):
+                    latest = last
+            rd_live = latest is not None and now - latest <= timedelta(hours=FRESH_HOURS)
+            if total and not rd_live:
+                log.warning("OpenAQ PM10 is stale (newest %s); synthetic readings anchor this run", latest)
         except Exception as e:
             if mode == "live":
                 raise
             log.warning("OpenAQ unavailable (%s); using synthetic readings", e)
     elif mode == "live":
         raise RuntimeError("OPENAQ_API_KEY is required for live readings")
-    if not rd_live:
+    n_synthetic = 0
+    if not rd_live and mode != "live":
         hist_wx = wx[wx["ts"] <= now]
         ids = [s["id"] for s in seed["stations"]]
-        total = db.write_readings(conn, synthetic.readings(hist_wx, ids), synthetic=True)
-    report["readings"] = {"rows": total, "live": rd_live}
+        n_synthetic = db.write_readings(conn, synthetic.readings(hist_wx, ids), synthetic=True)
+    report["readings"] = {"rows": total, "synthetic_rows": n_synthetic, "live": rd_live,
+                          "newest_live": latest.isoformat() if latest is not None else None}
     return report
 
 
@@ -102,10 +128,7 @@ def run(conn, settings: Settings) -> dict:
     wx["ts"] = pd.to_datetime(wx["ts"], utc=True)
     rd["ts"] = pd.to_datetime(rd["ts"], utc=True)
 
-    # Use only stations with recent data.
-    t0 = rd.dropna(subset=["pm10"])["ts"].max().floor("h")
-    recent = rd[rd["ts"] > t0 - pd.Timedelta(hours=24)].groupby("station_id")["pm10"].count()
-    active = recent[recent >= 6].index
+    t0, active = anchor(rd, now_hour())
     rd = rd[rd["station_id"].isin(active)]
 
     model = forecast.train(rd[["station_id", "ts", "pm10"]], wx, settings.horizon_hours, settings.exceed_threshold)
@@ -131,6 +154,28 @@ def run(conn, settings: Settings) -> dict:
     counts = pd.Series([h.status for h in hours]).value_counts().to_dict()
     return {"run_id": run_id, "issued_at": t0.isoformat(), "data_mode": data_mode,
             "metrics": model.metrics, "window_counts": counts, "stations": list(active)}
+
+
+def anchor(rd: pd.DataFrame, now: pd.Timestamp) -> tuple[pd.Timestamp, pd.Index]:
+    """Forecast origin t0 and the stations to use: stations with 6+ readings in the 24 h before t0.
+
+    Real stations win while their newest reading is under FRESH_HOURS old. Otherwise the synthetic
+    samples anchor the run, so a stalled feed can't push the 48 h forecast into the past.
+    """
+    ok = rd.dropna(subset=["pm10"])
+    is_syn = ok["synthetic"].astype(bool)
+    real, syn = ok[~is_syn], ok[is_syn]
+    fresh = not real.empty and now - real["ts"].max() <= pd.Timedelta(hours=FRESH_HOURS)
+    t0, active = ok["ts"].max().floor("h"), pd.Index([])
+    for pool in ([real] if fresh else []) + [syn, ok]:
+        if pool.empty:
+            continue
+        t0 = pool["ts"].max().floor("h")
+        recent = pool[pool["ts"] > t0 - pd.Timedelta(hours=24)].groupby("station_id")["pm10"].count()
+        active = recent[recent >= 6].index
+        if len(active):
+            break
+    return t0, active
 
 
 def _mode(wx_any, wx_all, rd_any, rd_all) -> str:
