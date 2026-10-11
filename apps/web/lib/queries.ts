@@ -86,8 +86,14 @@ export async function getSite(id: string): Promise<Site | null> {
   return r[0] ?? null;
 }
 
+// Same rule as the engine (db.RECEPTORS_SQL): real OSM schools and hospitals replace the demo ones once loaded.
 export async function getReceptors(): Promise<Receptor[]> {
-  return q<Receptor>("select id, name, kind, lat, lon, population, source from receptors where ward_id=$1", [WARD]);
+  return q<Receptor>(
+    `select id, name, kind, lat, lon, population, source from receptors r
+      where ward_id=$1 and not (source = 'seed' and kind in ('school', 'hospital') and exists (
+        select 1 from receptors o where o.ward_id = r.ward_id and o.source = 'osm'))`,
+    [WARD],
+  );
 }
 
 export async function getStations(ids?: string[]): Promise<Station[]> {

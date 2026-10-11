@@ -74,12 +74,12 @@ First live runs (Oct 11, 2026, from GitHub Actions and the build sandbox):
   - OpenAQ returns 500s for long ranges, so history is fetched in 30-day windows. The free key allows 60 requests a minute; a 420-day backfill takes about 6 minutes.
 - **Freshness rule (`pipeline.anchor`, `FRESH_HOURS = 6`):** real stations anchor the forecast only while their newest reading is under 6 h old. Otherwise the seed stations' synthetic readings anchor it, so a stalled feed can't push the 48 h forecast into the past, and the run is `mixed`. The switch to real stations is automatic once OpenAQ catches up.
 - The hourly job loads 3 days. After an outage longer than that, run the workflow by hand with more `days` to fill the gap.
-- Overpass (`dusttrace osm`) has still never run against the real API.
+- **Overpass works through a mirror** (overpass-api.de resets connections; `sources/overpass.py` falls back to kumi.systems and mail.ru). The bbox plus about 1 km gives about 230 schools and hospitals. Clinics, dental, diagnostic centres and unnamed "hospitals" are dropped, since OSM in Mumbai tags many of them `amenity=hospital`. A weekly workflow (`receptors.yml`) refreshes them.
 
 How fallback works:
 - In `--mode auto`, a failing source falls back to synthetic data. Those rows are flagged `synthetic=true`, and the run's `data_mode` becomes `synthetic` or `mixed`. Synthetic rows never overwrite real ones (guarded in `db.py`).
 - The console shows an amber banner and pill whenever the data isn't live. The map and the observed line show only the stations the latest run used.
-- Seed stations, the six sites (A–F) and the ten receptors in `data/seed/k-east.json` are **approximate demo positions**. Real OpenAQ stations are stored next to the seed ones and replace them in runs while fresh. Replace the receptors with `dusttrace osm`.
+- Seed stations, the six sites (A–F) and the ten receptors in `data/seed/k-east.json` are **approximate demo positions**. Real OpenAQ stations are stored next to the seed ones and replace them in runs while fresh. Once OSM receptors exist, they replace the demo schools and hospitals in runs and on the map (`db.RECEPTORS_SQL`); the demo housing societies stay, labelled, until a real population source is added.
 
 Latest synthetic run (420 days of history):
 - Mean error: 3.5 µg/m³ vs 8.9 for persistence.
