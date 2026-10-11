@@ -96,7 +96,8 @@ export DATABASE_URL=postgresql://postgres@localhost:5432/dusttrace
 # 2. Engine
 cd services/engine
 pip install -e ".[dev]"
-pytest -q                         # 10 tests, ~25 s
+pytest -q                         # unit tests; database tests skip without TEST_DATABASE_URL
+TEST_DATABASE_URL=postgresql://postgres@localhost:5432/dusttrace_test pytest -q   # all tests (wipes that database)
 python -m dusttrace all           # migrate, seed, ingest (auto, 420 days), run
 # later runs: python -m dusttrace ingest --days 3 && python -m dusttrace run
 
@@ -113,7 +114,7 @@ Use at least 420 days of history. With 120 days the holdout crosses a season cha
 
 1. **Supabase project:** done. The project `dusttrace` (ref `utcdxirkqpvtwndswfyn`, Mumbai) has both migrations and the K-East seed applied, and the repo secrets `DATABASE_URL` (Session pooler URI; GitHub runners have no IPv6, so the direct `db.<ref>.supabase.co` host won't work from Actions) and `OPENAQ_API_KEY` are set. The 420-day backfill ran on Oct 11, 2026.
    - The scheduled hourly run uses the workflow on `main`. The secret-check fix (`working-directory: .` on the gate step) must be on `main` or every scheduled run fails at its first step.
-   - The workflow only runs `ingest` and `run`. Apply any new migration with `python -m dusttrace init-db` (all migrations are safe to re-run) or the Supabase MCP, and give every new table `enable row level security`.
+   - The workflow runs `init-db` before `ingest` and `run`, so new migrations reach Supabase on the next hourly run. Keep every migration safe to re-run, and give every new table `enable row level security`.
 2. **Verify live data:** weather and OpenAQ station history are verified (see above). Still to do: watch for OpenAQ's CPCB feed to resume and the run's `data_mode` to turn `live`; if it stays stale, add CPCB's own real-time feed (data.gov.in) as a second source. Then run `dusttrace osm` for real schools and hospitals.
 3. **Deploy the console** on Vercel, root `apps/web`, env `DATABASE_URL`. Add a basic password, because ward data is sensitive.
 4. **Calibrate:** compare plume increments with station deltas downwind of real sites, tune the emission factors, and reach about 80% coverage for the quantile band.
