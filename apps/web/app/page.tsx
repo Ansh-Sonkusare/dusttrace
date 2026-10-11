@@ -14,7 +14,7 @@ export default async function Overview() {
 
   const [fc, windows, plumes, wx, sites, receptors, stations] = await Promise.all([
     getWardForecast(run.id), getWindows(run.id), getPlumes(run.id), getWeather(run.issued_at),
-    getSites(), getReceptors(), getStations(),
+    getSites(), getReceptors(), getStations(run.metrics.stations),
   ]);
   const hours = buildMapHours(windows, plumes, wx);
   const peak = fc.length ? fc.reduce((a, b) => (b.pm10 > a.pm10 ? b : a)) : null;

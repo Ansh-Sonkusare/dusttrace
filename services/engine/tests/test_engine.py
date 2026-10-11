@@ -1,13 +1,16 @@
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import httpx
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from dusttrace import forecast, plume, windows
+from dusttrace import forecast, pipeline, plume, windows
 from dusttrace.config import Settings
-from dusttrace.sources import openaq, openmeteo, overpass, synthetic
+from dusttrace.sources import http, openaq, openmeteo, overpass, synthetic
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -33,6 +36,13 @@ def test_openaq_parse_locations_keeps_pm_sensors_only():
     assert locs[0]["sensors"] == {"pm10": 11111, "pm25": 11112}
 
 
+def test_openaq_picks_the_replacement_sensor():
+    loc = {"id": 6956, "name": "Powai", "coordinates": {"latitude": 19.1375, "longitude": 72.9151},
+           "sensors": [{"id": 12235895, "parameter": {"name": "pm10"}}, {"id": 20010, "parameter": {"name": "pm10"}},
+                       {"id": 20079, "parameter": {"name": "pm25"}}, {"id": 12235896, "parameter": {"name": "pm25"}}]}
+    assert openaq.parse_locations({"results": [loc]})[0]["sensors"] == {"pm10": 12235895, "pm25": 12235896}
+
+
 def test_openaq_parse_hours_drops_bad_values():
     df = openaq.parse_hours(load("openaq_hours.json"))
     assert df["value"].tolist() == [142.5, 120.0]
@@ -42,6 +52,59 @@ def test_overpass_parse():
     recs = overpass.parse(load("overpass.json"))
     assert [r["kind"] for r in recs] == ["school", "hospital"]
     assert recs[1]["lat"] == 19.12
+
+
+def test_http_get_retries_server_errors_and_rate_limits():
+    replies = iter([httpx.Response(500), httpx.Response(429, headers={"x-ratelimit-reset": "7"}),
+                    httpx.Response(200, json={"ok": True})])
+    client = httpx.Client(transport=httpx.MockTransport(lambda req: next(replies)))
+    waits = []
+    r = http.get(client, "https://example.test/x", sleep=waits.append)
+    assert r.json() == {"ok": True}
+    assert waits == [2.0, 8]  # backoff, then the rate-limit reset + 1
+
+
+def test_http_get_gives_up_after_its_tries():
+    client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(500)))
+    with pytest.raises(httpx.HTTPStatusError):
+        http.get(client, "https://example.test/x", tries=2, sleep=lambda s: None)
+
+
+def test_openaq_history_is_fetched_in_short_windows():
+    seen = []
+
+    def reply(req):
+        seen.append((datetime.fromisoformat(req.url.params["datetime_from"]),
+                     datetime.fromisoformat(req.url.params["datetime_to"])))
+        return httpx.Response(200, json={"results": []})
+
+    end = datetime(2026, 10, 11, tzinfo=timezone.utc)
+    client = httpx.Client(transport=httpx.MockTransport(reply))
+    openaq.fetch_sensor_hours("key", 1, end - timedelta(days=420), end, client=client)
+    assert len(seen) == 14
+    assert seen[0][0] == end - timedelta(days=420) and seen[-1][1] == end
+    assert all(hi - lo <= openaq.WINDOW for lo, hi in seen)
+
+
+def _readings(station, end, hours, synthetic):
+    ts = pd.date_range(end=end, periods=hours, freq="h", tz="UTC")
+    return pd.DataFrame({"station_id": station, "ts": ts, "pm10": 80.0, "synthetic": synthetic})
+
+
+def test_fresh_real_stations_anchor_the_forecast():
+    now = pd.Timestamp("2026-10-11 21:00", tz="UTC")
+    rd = pd.concat([_readings("real", now - pd.Timedelta(hours=2), 48, False),
+                    _readings("seed", now, 48, True)])
+    t0, active = pipeline.anchor(rd, now)
+    assert t0 == now - pd.Timedelta(hours=2) and list(active) == ["real"]
+
+
+def test_stale_real_stations_hand_over_to_synthetic():
+    now = pd.Timestamp("2026-10-11 21:00", tz="UTC")
+    rd = pd.concat([_readings("real", now - pd.Timedelta(days=4), 48, False),
+                    _readings("seed", now, 48, True)])
+    t0, active = pipeline.anchor(rd, now)
+    assert t0 == now and list(active) == ["seed"]
 
 
 # ---------- plume ----------

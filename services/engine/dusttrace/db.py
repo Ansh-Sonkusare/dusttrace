@@ -79,7 +79,8 @@ def write_readings(conn, df: pd.DataFrame, synthetic: bool) -> int:
         cur.executemany(
             """insert into readings (station_id, ts, pm10, pm25, synthetic) values (%s,%s,%s,%s,%s)
                on conflict (station_id, ts) do update set pm10=excluded.pm10, pm25=excluded.pm25,
-               synthetic=excluded.synthetic""",
+               synthetic=excluded.synthetic
+               where readings.synthetic or not excluded.synthetic""",  # never overwrite real with synthetic
             [(r.station_id, r.ts.to_pydatetime(), _f(r.pm10), _f(r.pm25), synthetic)
              for r in df.itertuples()],
         )
@@ -97,7 +98,8 @@ def write_weather(conn, ward_id: str, df: pd.DataFrame, now: pd.Timestamp, synth
                on conflict (ward_id, ts) do update set wind_speed=excluded.wind_speed,
                wind_dir=excluded.wind_dir, blh=excluded.blh, temp=excluded.temp, rh=excluded.rh,
                precip=excluded.precip, is_forecast=excluded.is_forecast, synthetic=excluded.synthetic,
-               fetched_at=now()""",
+               fetched_at=now()
+               where weather_hourly.synthetic or not excluded.synthetic""",  # never overwrite real with synthetic
             [(ward_id, r.ts.to_pydatetime(), _f(r.wind_speed), _f(r.wind_dir), _f(r.blh), _f(r.temp),
               _f(r.rh), _f(r.precip), bool(r.ts > now), synthetic) for r in df.itertuples()],
         )

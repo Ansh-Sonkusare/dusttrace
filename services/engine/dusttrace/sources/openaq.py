@@ -6,13 +6,17 @@ Docs: https://docs.openaq.org/
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 import pandas as pd
 
+from . import http
+
 BASE = "https://api.openaq.org/v3"
 PARAMS_WANTED = {"pm10", "pm25"}
+# OpenAQ returns 500s for long ranges, so history is fetched in windows that fit one page (limit 1000).
+WINDOW = timedelta(days=30)
 
 
 def _client(api_key: str, client: httpx.Client | None) -> httpx.Client:
@@ -31,7 +35,9 @@ def parse_locations(payload: dict) -> list[dict]:
         for s in loc.get("sensors") or []:
             name = ((s.get("parameter") or {}).get("name") or "").lower()
             if name in PARAMS_WANTED and s.get("id") is not None:
-                sensors[name] = s["id"]
+                # CPCB locations can list a retired sensor next to its replacement; ids are sequential,
+                # so the highest id is the current one.
+                sensors[name] = max(sensors.get(name, s["id"]), s["id"])
         if not sensors:
             continue
         out.append({
@@ -41,6 +47,7 @@ def parse_locations(payload: dict) -> list[dict]:
             "lon": float(lon),
             "sensors": sensors,
             "provider": ((loc.get("provider") or {}).get("name")),
+            "last": ((loc.get("datetimeLast") or {}).get("utc")),
         })
     return out
 
@@ -62,31 +69,38 @@ def parse_hours(payload: dict) -> pd.DataFrame:
     return df
 
 
-def find_stations(api_key: str, bbox: list[float], client: httpx.Client | None = None) -> list[dict]:
+def find_stations(api_key: str, bbox: list[float], client: httpx.Client | None = None,
+                  active_since: datetime | None = None) -> list[dict]:
+    """Stations in the bbox. With `active_since`, drop those known to have stopped reporting before it."""
     c = _client(api_key, client)
-    r = c.get(f"{BASE}/locations", params={"bbox": ",".join(str(x) for x in bbox), "limit": 100})
-    r.raise_for_status()
-    return parse_locations(r.json())
+    r = http.get(c, f"{BASE}/locations", params={"bbox": ",".join(str(x) for x in bbox), "limit": 100})
+    stations = parse_locations(r.json())
+    if active_since is not None:
+        cutoff = pd.Timestamp(active_since)
+        stations = [s for s in stations if s["last"] is None or pd.Timestamp(s["last"]) >= cutoff]
+    return stations
 
 
 def fetch_sensor_hours(api_key: str, sensor_id: int, start: datetime, end: datetime,
-                       client: httpx.Client | None = None, max_pages: int = 20) -> pd.DataFrame:
+                       client: httpx.Client | None = None, max_pages: int = 5) -> pd.DataFrame:
     c = _client(api_key, client)
     frames = []
-    for page in range(1, max_pages + 1):
-        r = c.get(f"{BASE}/sensors/{sensor_id}/hours", params={
-            "datetime_from": start.isoformat(),
-            "datetime_to": end.isoformat(),
-            "limit": 1000,
-            "page": page,
-        })
-        r.raise_for_status()
-        df = parse_hours(r.json())
-        if df.empty:
-            break
-        frames.append(df)
-        if len(df) < 1000:
-            break
+    lo = start
+    while lo < end:
+        hi = min(lo + WINDOW, end)
+        for page in range(1, max_pages + 1):
+            r = http.get(c, f"{BASE}/sensors/{sensor_id}/hours", params={
+                "datetime_from": lo.isoformat(),
+                "datetime_to": hi.isoformat(),
+                "limit": 1000,
+                "page": page,
+            })
+            df = parse_hours(r.json())
+            if not df.empty:
+                frames.append(df)
+            if len(df) < 1000:
+                break
+        lo = hi
     if not frames:
         return pd.DataFrame(columns=["ts", "value"])
     return pd.concat(frames).drop_duplicates("ts").sort_values("ts")

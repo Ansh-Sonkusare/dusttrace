@@ -11,7 +11,7 @@ const n = (v: number | undefined, d = 1) => (v === undefined ? "–" : v.toFixed
 export default async function ForecastPage() {
   const [ward, run] = await Promise.all([getWard(), getLatestRun()]);
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
-  const [fc, obs, peaks] = await Promise.all([getWardForecast(run.id), getObserved(run.issued_at), getStationPeaks(run.id)]);
+  const [fc, obs, peaks] = await Promise.all([getWardForecast(run.id), getObserved(run.issued_at, run.metrics.stations), getStationPeaks(run.id)]);
   const m = run.metrics;
 
   return (

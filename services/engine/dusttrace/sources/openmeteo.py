@@ -10,6 +10,8 @@ from datetime import date
 import httpx
 import pandas as pd
 
+from . import http
+
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
@@ -56,8 +58,7 @@ def fetch_forecast(lat: float, lon: float, past_days: int = 92, forecast_days: i
         "forecast_days": forecast_days,
     }
     c = client or httpx.Client(timeout=30)
-    r = c.get(FORECAST_URL, params=params)
-    r.raise_for_status()
+    r = http.get(c, FORECAST_URL, params=params)
     return parse_hourly(r.json())
 
 
@@ -73,6 +74,5 @@ def fetch_archive(lat: float, lon: float, start: date, end: date,
         "end_date": end.isoformat(),
     }
     c = client or httpx.Client(timeout=60)
-    r = c.get(ARCHIVE_URL, params=params)
-    r.raise_for_status()
+    r = http.get(c, ARCHIVE_URL, params=params)
     return parse_hourly(r.json())
