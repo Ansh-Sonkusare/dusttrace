@@ -35,7 +35,9 @@ def parse_locations(payload: dict) -> list[dict]:
         for s in loc.get("sensors") or []:
             name = ((s.get("parameter") or {}).get("name") or "").lower()
             if name in PARAMS_WANTED and s.get("id") is not None:
-                sensors[name] = s["id"]
+                # CPCB locations can list a retired sensor next to its replacement; ids are sequential,
+                # so the highest id is the current one.
+                sensors[name] = max(sensors.get(name, s["id"]), s["id"])
         if not sensors:
             continue
         out.append({

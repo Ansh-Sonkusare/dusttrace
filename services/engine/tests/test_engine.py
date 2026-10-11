@@ -36,6 +36,13 @@ def test_openaq_parse_locations_keeps_pm_sensors_only():
     assert locs[0]["sensors"] == {"pm10": 11111, "pm25": 11112}
 
 
+def test_openaq_picks_the_replacement_sensor():
+    loc = {"id": 6956, "name": "Powai", "coordinates": {"latitude": 19.1375, "longitude": 72.9151},
+           "sensors": [{"id": 12235895, "parameter": {"name": "pm10"}}, {"id": 20010, "parameter": {"name": "pm10"}},
+                       {"id": 20079, "parameter": {"name": "pm25"}}, {"id": 12235896, "parameter": {"name": "pm25"}}]}
+    assert openaq.parse_locations({"results": [loc]})[0]["sensors"] == {"pm10": 12235895, "pm25": 12235896}
+
+
 def test_openaq_parse_hours_drops_bad_values():
     df = openaq.parse_hours(load("openaq_hours.json"))
     assert df["value"].tolist() == [142.5, 120.0]
