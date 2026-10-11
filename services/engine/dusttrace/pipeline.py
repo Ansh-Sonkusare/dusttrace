@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pandas as pd
 
-from . import db, forecast, windows
+from . import audit, db, forecast, windows
 from .config import Settings, load_seed
 from .sources import openaq, openmeteo, overpass, synthetic
 
@@ -140,9 +140,11 @@ def run(conn, settings: Settings) -> dict:
     fc = forecast.predict(model, rd[["station_id", "ts", "pm10"]], wx, t0, settings.horizon_hours)
 
     data_mode = _mode(wx["synthetic"].any(), wx["synthetic"].all(), rd["synthetic"].any(), rd["synthetic"].all())
-    metrics = {**model.metrics, "stations": list(active)}
+    audits, bench = audit_sensors(conn, ward_id, rd, wx, t0)
+    metrics = {**model.metrics, "stations": list(active), "audit": bench}
     run_id = db.create_run(conn, ward_id, t0.to_pydatetime(), data_mode, "lightgbm-direct-v1", metrics)
     db.write_forecasts(conn, run_id, fc)
+    db.write_audits(conn, run_id, audits)
 
     ward_fc = fc[fc["station_id"] == "ward"].set_index("ts")["p_exceed"]
     future = wx[(wx["ts"] > t0) & (wx["ts"] <= t0 + pd.Timedelta(hours=settings.horizon_hours))]
@@ -158,7 +160,23 @@ def run(conn, settings: Settings) -> dict:
 
     counts = pd.Series([h.status for h in hours]).value_counts().to_dict()
     return {"run_id": run_id, "issued_at": t0.isoformat(), "data_mode": data_mode,
-            "metrics": model.metrics, "window_counts": counts, "stations": list(active)}
+            "metrics": metrics, "window_counts": counts, "stations": list(active),
+            "sensor_trust": {a.site_id: a.score for a in audits}}
+
+
+def audit_sensors(conn, ward_id: str, rd: pd.DataFrame, wx: pd.DataFrame, t0: pd.Timestamp):
+    """Simulate each site's sensor from the ambient series, store the readings, and score them (F1).
+
+    Also scores a 50-sensor benchmark with known faults, so each run reports the audit's precision
+    and recall under the current weather.
+    """
+    specs = [audit.SensorSpec(r.sensor_id, r.site_id, float(r.lat), float(r.lon), float(r.area_m2),
+                              r.activity, r.fault) for r in db.read_sensor_specs(conn, ward_id).itertuples()]
+    ambient = rd.groupby("ts")["pm10"].mean()
+    sim = audit.simulate(specs, ambient, wx, t0)
+    db.write_site_readings(conn, sim)
+    results = [audit.score(s, sim, ambient, wx, t0) for s in specs]
+    return results, audit.benchmark(ambient, wx, t0)
 
 
 def anchor(rd: pd.DataFrame, now: pd.Timestamp) -> tuple[pd.Timestamp, pd.Index]:

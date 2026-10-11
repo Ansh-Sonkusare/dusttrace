@@ -59,6 +59,10 @@ Overpass (schools, hosp.) ─┘                                (LightGBM + Gaus
   - Virtual source set back by √area.
   - AP-42 emission rate of 8.6e-5 g/s/m² × an activity factor: demolition 3, excavation 2, debris 1.5, structure 1.
   - The footprint is traced from 50 m out at 25 µg/m³.
+- `audit.py` (F1): site-sensor simulator and trust score.
+  - Each site's sensor reads ambient + near-field dust while the site works + its plume when downwind. Faults are injected per `data/seed/k-east.json` (C too clean, E flatline, F dropout; D has no sensor).
+  - Seven checks over 7 days (dropout, flatline, neighbour, working-hours signature, placement, humidity, drift) give a 0–100 score: trusted 70+, check 40–69, untrusted < 40 (D5).
+  - Each run also scores a 50-sensor benchmark; its precision/recall are in `runs.metrics.audit`.
 - `windows.py`:
   - **Avoid** if a school or hospital gets ≥ 40 µg/m³ added, or any receptor gets ≥ 40 while P(PM10 > 100) ≥ 0.6.
   - **Caution** if any receptor gets ≥ 15, or P ≥ 0.6.

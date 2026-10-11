@@ -1,5 +1,5 @@
 {
-  "_note": "Seed data for milestone 1. Stations are approximate placeholders until OpenAQ discovery replaces them with real station ids. Sites and receptors are DEMO entries for the prototype; run `dusttrace osm` online to load real schools and hospitals.",
+  "_note": "Seed data. Stations are approximate placeholders; OpenAQ discovery adds the real ones. Sites, their sensors and the housing receptors are DEMO entries for the prototype. Site sensors are SIMULATED from real ambient data with the listed fault injected (ground truth for the audit); D has no sensor. `dusttrace osm` loads real schools and hospitals.",
   "ward": {
     "id": "K-East",
     "name": "K-East (Andheri East)",
@@ -41,7 +41,12 @@
       "lat": 19.117,
       "lon": 72.856,
       "area_m2": 8000,
-      "sensor_status": "trusted"
+      "sensor": {
+        "id": "A-1",
+        "vendor": "Oizom AQBot (demo)",
+        "relay": true,
+        "fault": "none"
+      }
     },
     {
       "id": "B",
@@ -51,7 +56,12 @@
       "lat": 19.1115,
       "lon": 72.865,
       "area_m2": 6000,
-      "sensor_status": "trusted"
+      "sensor": {
+        "id": "B-1",
+        "vendor": "Airveda (demo)",
+        "relay": false,
+        "fault": "none"
+      }
     },
     {
       "id": "C",
@@ -61,7 +71,12 @@
       "lat": 19.119,
       "lon": 72.883,
       "area_m2": 7000,
-      "sensor_status": "untrusted"
+      "sensor": {
+        "id": "C-1",
+        "vendor": "Airveda (demo)",
+        "relay": false,
+        "fault": "too_clean"
+      }
     },
     {
       "id": "D",
@@ -70,8 +85,7 @@
       "developer": "Unknown",
       "lat": 19.1255,
       "lon": 72.875,
-      "area_m2": 4000,
-      "sensor_status": "none"
+      "area_m2": 4000
     },
     {
       "id": "E",
@@ -81,7 +95,12 @@
       "lat": 19.1035,
       "lon": 72.888,
       "area_m2": 9000,
-      "sensor_status": "trusted"
+      "sensor": {
+        "id": "E-1",
+        "vendor": "Oizom AQBot (demo)",
+        "relay": true,
+        "fault": "flatline"
+      }
     },
     {
       "id": "F",
@@ -91,7 +110,12 @@
       "lat": 19.1,
       "lon": 72.862,
       "area_m2": 5000,
-      "sensor_status": "trusted"
+      "sensor": {
+        "id": "F-1",
+        "vendor": "Airveda (demo)",
+        "relay": false,
+        "fault": "dropout"
+      }
     }
   ],
   "receptors": [

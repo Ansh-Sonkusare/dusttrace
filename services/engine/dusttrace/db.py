@@ -46,6 +46,16 @@ def upsert_seed(conn: psycopg.Connection, seed: dict) -> None:
             (s["id"], s["name"], s["activity"], s.get("developer"), s["lat"], s["lon"], w["id"],
              s.get("area_m2", 5000), s.get("sensor_status", "unknown")),
         )
+    for s in seed["sites"]:
+        sn = s.get("sensor")
+        if sn:
+            conn.execute(
+                """insert into site_sensors (id, site_id, vendor, has_relay, simulated, injected_fault)
+                   values (%s,%s,%s,%s,true,%s)
+                   on conflict (id) do update set site_id=excluded.site_id, vendor=excluded.vendor,
+                   has_relay=excluded.has_relay, injected_fault=excluded.injected_fault""",
+                (sn["id"], s["id"], sn.get("vendor"), bool(sn.get("relay")), sn.get("fault", "none")),
+            )
     upsert_receptors(conn, [{**r, "source": "seed"} for r in seed["receptors"]], w["id"])
     conn.commit()
 
@@ -172,3 +182,33 @@ def _f(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def read_sensor_specs(conn, ward_id: str) -> pd.DataFrame:
+    return read_frame(conn, """select n.id as sensor_id, n.site_id, s.lat, s.lon, s.area_m2, s.activity,
+                                      coalesce(n.injected_fault, 'none') as fault
+                                 from site_sensors n join sites s on s.id = n.site_id
+                                where s.ward_id=%s order by n.id""", (ward_id,))
+
+
+def write_site_readings(conn, df: pd.DataFrame) -> int:
+    """Simulated site-sensor readings. Always synthetic until BMC's feed is connected."""
+    if df.empty:
+        return 0
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into site_readings (sensor_id, ts, pm10, pm25, rh, synthetic) values (%s,%s,%s,%s,%s,true)
+               on conflict (sensor_id, ts) do update set pm10=excluded.pm10, pm25=excluded.pm25, rh=excluded.rh
+               where site_readings.synthetic""",
+            [(r.sensor_id, pd.Timestamp(r.ts).to_pydatetime(), _f(r.pm10), _f(r.pm25), _f(r.rh)) for r in df.itertuples()],
+        )
+    return len(df)
+
+
+def write_audits(conn, run_id: int, results) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into sensor_audits (run_id, sensor_id, site_id, score, band, checks, reasons)
+               values (%s,%s,%s,%s,%s,%s,%s)""",
+            [(run_id, a.sensor_id, a.site_id, a.score, a.band, json.dumps(a.checks), a.reasons) for a in results],
+        )
