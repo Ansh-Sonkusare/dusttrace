@@ -8,9 +8,9 @@ from datetime import timedelta
 
 import pandas as pd
 
-from . import agent, alerts, attribution, audit, backtest as bt, db, dust_score, forecast, windows
+from . import agent, alerts, attribution, audit, backtest as bt, db, dust_score, fill, forecast, windows
 from .config import Settings, load_seed
-from .sources import openaq, openmeteo, overpass, synthetic
+from .sources import cams, openaq, openmeteo, overpass, synthetic
 
 log = logging.getLogger("dusttrace")
 
@@ -97,6 +97,13 @@ def ingest(conn, settings: Settings, mode: str = "auto", days: int = 120) -> dic
             log.warning("OpenAQ unavailable (%s); using synthetic readings", e)
     elif mode == "live":
         raise RuntimeError("OPENAQ_API_KEY is required for live readings")
+    if mode in ("auto", "live"):
+        try:
+            report["cams"] = ingest_cams(conn, ward["id"], now, max(days, 70))
+        except Exception as e:  # CAMS is only a fallback; never fail the run for it
+            log.warning("CAMS unavailable (%s)", e)
+            report["cams"] = {"rows": 0, "error": str(e)[:200]}
+
     n_synthetic = 0
     if not rd_live and mode != "live":
         hist_wx = wx[wx["ts"] <= now]
@@ -105,6 +112,18 @@ def ingest(conn, settings: Settings, mode: str = "auto", days: int = 120) -> dic
     report["readings"] = {"rows": total, "synthetic_rows": n_synthetic, "live": rd_live,
                           "newest_live": latest.isoformat() if latest is not None else None}
     return report
+
+
+def ingest_cams(conn, ward_id: str, now: pd.Timestamp, days: int) -> dict:
+    """CAMS PM at every real station's position, `days` back to 3 days ahead (issue #28)."""
+    st = db.read_frame(conn, "select id, lat, lon from stations where ward_id=%s and source='openaq'", (ward_id,))
+    if st.empty:
+        return {"rows": 0, "stations": 0}
+    stations = [{"id": r.id, "lat": float(r.lat), "lon": float(r.lon)} for r in st.itertuples()]
+    df = cams.fetch(stations, (now - timedelta(days=days)).date().isoformat(), (now + timedelta(days=3)).date().isoformat())
+    n = db.write_cams(conn, df)
+    conn.commit()
+    return {"rows": n, "stations": len(stations)}
 
 
 def receptor_bbox(ward_bbox: list[float], margin_deg: float = 0.01) -> list[float]:
@@ -136,15 +155,27 @@ def run(conn, settings: Settings) -> dict:
 
     real_ts = rd.loc[~rd["synthetic"].astype(bool) & rd["pm10"].notna(), "ts"]
     newest_real = real_ts.max().isoformat() if len(real_ts) else None  # shown when the live feed lags
+    rd["filled"] = False
+    filled, fill_info = fill_from_cams(conn, ward_id, rd, now_hour())
+    if not filled.empty:
+        rd = pd.concat([rd, filled], ignore_index=True)
     t0, active = anchor(rd, now_hour())
     rd = rd[rd["station_id"].isin(active)]
 
-    model = forecast.train(rd[["station_id", "ts", "pm10"]], wx, settings.horizon_hours, settings.exceed_threshold)
+    # Train on measured hours only; filled hours only let the forecast start from now.
+    train_rd = rd[~rd["filled"].astype(bool)]
+    model = forecast.train(train_rd[["station_id", "ts", "pm10"]], wx, settings.horizon_hours, settings.exceed_threshold)
     fc = forecast.predict(model, rd[["station_id", "ts", "pm10"]], wx, t0, settings.horizon_hours)
 
     data_mode = _mode(wx["synthetic"].any(), wx["synthetic"].all(), rd["synthetic"].any(), rd["synthetic"].all())
+    if data_mode == "live" and rd["filled"].astype(bool).any():
+        data_mode = "filled"  # real stations, recent hours from corrected CAMS
     audits, bench, hot = audit_sensors(conn, ward_id, rd, wx, t0)
-    metrics = {**model.metrics, "stations": list(active), "audit": bench, "newest_real_reading": newest_real}
+    used = rd[rd["filled"].astype(bool)]
+    fill_info["stations"] = int(used["station_id"].nunique())
+    fill_info["hours"] = int(used.groupby("station_id").size().max()) if len(used) else 0
+    metrics = {**model.metrics, "stations": list(active), "audit": bench, "newest_real_reading": newest_real,
+               "filled": fill_info}
     run_id = db.create_run(conn, ward_id, t0.to_pydatetime(), data_mode, "lightgbm-direct-v1", metrics)
     db.write_forecasts(conn, run_id, fc)
     db.write_audits(conn, run_id, audits)
@@ -261,6 +292,40 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
     return states
 
 
+FILL_MAX_STALE = pd.Timedelta(days=30)  # a station silent for longer is treated as closed, not filled
+
+
+def fill_from_cams(conn, ward_id: str, rd: pd.DataFrame, now: pd.Timestamp) -> tuple[pd.DataFrame, dict]:
+    """Corrected CAMS rows for real stations whose feed is stale (issue #28). Never written to readings."""
+    info = {"stations": 0, "hours": 0, "corrections": {}}
+    real = rd[~rd["synthetic"].astype(bool) & rd["pm10"].notna()]
+    if real.empty:
+        return pd.DataFrame(columns=rd.columns), info
+    cm = db.read_frame(conn, """select c.station_id, c.ts, c.pm10 from cams_hourly c join stations s on s.id = c.station_id
+                                 where s.ward_id=%s and c.pm10 is not null order by c.ts""", (ward_id,))
+    if cm.empty:
+        return pd.DataFrame(columns=rd.columns), info
+    cm["ts"] = pd.to_datetime(cm["ts"], utc=True)
+    cm["pm10"] = cm["pm10"].astype(float)
+    rows = []
+    for sid, obs in real.groupby("station_id"):
+        last = obs["ts"].max()
+        if now - last <= pd.Timedelta(hours=FRESH_HOURS) or now - last > FILL_MAX_STALE:
+            continue
+        model = cm[cm["station_id"] == sid].set_index("ts")["pm10"]
+        o = obs.set_index("ts")["pm10"]
+        k = fill.fit(o, model)
+        if k.method == "none":
+            continue
+        g = fill.gap(o, model, k, now)
+        if g.empty:
+            continue
+        info["corrections"][sid] = {"slope": k.slope, "intercept": k.intercept, "hours": k.hours, "mae": k.mae,
+                                    "method": k.method, "last_real": last.isoformat()}
+        rows.append(pd.DataFrame({"station_id": sid, "ts": g.index, "pm10": g.to_numpy(), "synthetic": False, "filled": True}))
+    return (pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=rd.columns)), info
+
+
 def backtest(conn, settings: Settings, days: int = 60) -> dict:
     """Back-test the forecast over the last `days` days of data (F3). Uses only real station readings
     when there are any, so the report's numbers are real; otherwise synthetic, and labelled so."""
@@ -311,6 +376,38 @@ def discover_sites(conn, settings: Settings, months_back: int = 12) -> dict:
     n = db.write_candidates(conn, settings.ward_id, res["before"], res["after"], res["candidates"])
     return {"before": res["before"], "after": res["after"], "candidates": n,
             "matched": sorted({c["site_id"] for c in res["candidates"] if c["site_id"]})}
+
+
+def replay_outage(conn, settings: Settings, days: int = 30, outage_h: int = 96) -> dict:
+    """Verify the CAMS fill on real history (issue #28) and store the result as a back-test."""
+    rd = db.read_frame(conn, """select r.station_id, r.ts, r.pm10 from readings r join stations s on s.id = r.station_id
+                                where s.ward_id=%s and not r.synthetic and r.pm10 is not null order by r.ts""", (settings.ward_id,))
+    cm = db.read_frame(conn, """select c.station_id, c.ts, c.pm10 from cams_hourly c join stations s on s.id = c.station_id
+                                where s.ward_id=%s and c.pm10 is not null""", (settings.ward_id,))
+    wx = db.read_frame(conn, "select ts, wind_speed, wind_dir, blh, temp, rh, precip, synthetic from weather_hourly where ward_id=%s order by ts", (settings.ward_id,))
+    if rd.empty or cm.empty:
+        raise RuntimeError("Needs real readings and CAMS: run `dusttrace ingest` online first.")
+    for c in ["wind_speed", "wind_dir", "blh", "temp", "rh", "precip"]:
+        wx[c] = wx[c].astype(float)
+    wx["ts"] = pd.to_datetime(wx["ts"], utc=True)
+    for f in (rd, cm):
+        f["ts"] = pd.to_datetime(f["ts"], utc=True)
+        f["pm10"] = f["pm10"].astype(float)
+    counts = rd.groupby("station_id")["pm10"].count()
+    rd = rd[rd["station_id"].isin(counts[counts >= 24 * 60].index)]
+    end = rd["ts"].max().floor("D")
+    start = end - pd.Timedelta(days=days)
+    res = bt.outage_replay(rd, cm, wx, start, end, outage_h, settings.horizon_hours, 24, settings.exceed_threshold)
+    note = (f"Outage replay: the last {outage_h} h before each forecast hidden and filled from corrected CAMS. "
+            "Weather at the target hour is observed weather.")
+    mode = "live" if not wx[(wx["ts"] >= rd["ts"].min()) & (wx["ts"] <= end)]["synthetic"].any() else "mixed"
+    row = conn.execute(
+        """insert into backtests (ward_id, kind, data_mode, stations, train_end, test_end, origins, metrics, note)
+           values (%s,'outage_replay',%s,%s,%s,%s,%s,%s,%s) returning id""",
+        (settings.ward_id, mode, res["stations"], start.to_pydatetime(), end.to_pydatetime(), res["origins"],
+         json.dumps(res["metrics"]), note)).fetchone()
+    conn.commit()
+    return {"id": row[0], "data_mode": mode, **{k: res[k] for k in ("origins", "outage_hours", "stations", "metrics")}}
 
 
 def plume_hour(ts) -> float:

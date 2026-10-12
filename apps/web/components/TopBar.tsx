@@ -3,6 +3,7 @@ import { dayHour } from "@/lib/format";
 
 const MODE: Record<Run["data_mode"], { cls: string; label: string }> = {
   live: { cls: "go", label: "Live data" },
+  filled: { cls: "caution", label: "Real stations, recent hours model-filled" },
   mixed: { cls: "caution", label: "Partly synthetic data" },
   synthetic: { cls: "dust", label: "Synthetic data" },
 };

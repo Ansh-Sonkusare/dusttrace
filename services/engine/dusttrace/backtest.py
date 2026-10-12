@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score
 
-from . import forecast
+from . import fill, forecast
 
 BUCKETS = {"1-24": (1, 24), "25-48": (25, 48)}
 IST = pd.Timedelta(hours=5.5)
@@ -106,3 +106,62 @@ def _spike_day(actual: pd.Series, issued: dict, start, end, horizon) -> dict | N
         "p_exceed_max": round(float(hours["p_exceed"].max()), 3),
         "flagged": bool(hours["p_exceed"].max() >= 0.5),
     }
+
+
+def outage_replay(readings: pd.DataFrame, cams_df: pd.DataFrame, wx: pd.DataFrame, start: pd.Timestamp,
+                  end: pd.Timestamp, outage_h: int = 96, horizon: int = 48, step_h: int = 24,
+                  threshold: float = 100.0) -> dict:
+    """Verify the CAMS fill (issue #28) on real history.
+
+    At each origin, hide the last `outage_h` hours of every station, fill them with CAMS corrected on
+    the data before the outage, forecast, and score against what the stations then measured. Compared
+    with: the forecast from the real data (no outage), corrected CAMS used directly, and the last real
+    value carried forward.
+    """
+    readings = readings.copy()
+    readings["ts"] = pd.to_datetime(readings["ts"], utc=True)
+    cams_df = cams_df.copy()
+    cams_df["ts"] = pd.to_datetime(cams_df["ts"], utc=True)
+    model = forecast.train(readings[readings["ts"] < start], wx, horizon, threshold)
+    actual = _ward_actual(readings)
+    rows = {k: [] for k in ("real", "filled", "cams_direct", "last_value")}
+    origins = pd.date_range(start, end - pd.Timedelta(hours=horizon), freq=f"{step_h}h", tz="UTC")
+    used = 0
+    for t0 in origins:
+        cut = t0 - pd.Timedelta(hours=outage_h)
+        seen = readings[readings["ts"] <= cut]
+        fills, direct = [], []
+        for sid, obs in seen.groupby("station_id"):
+            cm = cams_df[cams_df["station_id"] == sid].set_index("ts")["pm10"]
+            k = fill.fit(obs.set_index("ts")["pm10"], cm)
+            if k.method == "none":
+                continue
+            g = fill.gap(obs.set_index("ts")["pm10"], cm, k, t0)
+            fills.append(pd.DataFrame({"station_id": sid, "ts": g.index, "pm10": g.to_numpy()}))
+            fut = fill.apply(cm[(cm.index > t0) & (cm.index <= t0 + pd.Timedelta(hours=horizon))], k)
+            direct.append(fut.rename(sid))
+        if not fills or t0 not in actual.index:
+            continue
+        used += 1
+        filled = pd.concat([seen[["station_id", "ts", "pm10"]]] + fills, ignore_index=True)
+        f_real = forecast.predict(model, readings[readings["ts"] <= t0], wx, t0, horizon)
+        f_fill = forecast.predict(model, filled, wx, t0, horizon)
+        cams_ward = pd.concat(direct, axis=1, sort=True).mean(axis=1)
+        last_seen = _ward_actual(seen)
+        last_value = float(last_seen.iloc[-1]) if len(last_seen) else np.nan
+        for name, fc in (("real", f_real), ("filled", f_fill)):
+            w = fc[fc["station_id"] == "ward"].set_index("ts")
+            for ts, r in w.iterrows():
+                if ts in actual.index:
+                    rows[name].append({"h": int((ts - t0) / pd.Timedelta(hours=1)), "pred": r["pm10"], "lo": r["pm10_lo"],
+                                       "hi": r["pm10_hi"], "p": r["p_exceed"], "actual": actual[ts], "persist": actual[t0]})
+        for ts, v in cams_ward.items():
+            if ts in actual.index:
+                h = int((ts - t0) / pd.Timedelta(hours=1))
+                rows["cams_direct"].append({"h": h, "pred": v, "lo": v, "hi": v, "p": float(v > threshold),
+                                            "actual": actual[ts], "persist": actual[t0]})
+                rows["last_value"].append({"h": h, "pred": last_value, "lo": last_value, "hi": last_value,
+                                           "p": float(last_value > threshold), "actual": actual[ts], "persist": actual[t0]})
+    out = {k: metrics(pd.DataFrame(v), threshold) if v else {} for k, v in rows.items()}
+    return {"metrics": out, "origins": used, "outage_hours": outage_h, "stations": sorted(model.station_codes),
+            "train_end": start, "test_end": end}

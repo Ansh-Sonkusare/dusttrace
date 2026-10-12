@@ -11,7 +11,7 @@ const n = (v: number | undefined, d = 1) => (v === undefined ? "–" : v.toFixed
 export default async function ForecastPage() {
   const [ward, run] = await Promise.all([getWard(), getLatestRun()]);
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
-  const [fc, obs, peaks, bt] = await Promise.all([getWardForecast(run.id), getObserved(run.issued_at, run.metrics.stations), getStationPeaks(run.id), getLatestBacktest()]);
+  const [fc, obs, peaks, bt, replay] = await Promise.all([getWardForecast(run.id), getObserved(run.issued_at, run.metrics.stations), getStationPeaks(run.id), getLatestBacktest(), getLatestBacktest("outage_replay")]);
   const m = run.metrics;
 
   return (
@@ -83,6 +83,26 @@ export default async function ForecastPage() {
                 )}
                 <p className="muted" style={{ margin: 0 }}>Each forecast saw only data up to its issue time; the model was trained on earlier months. {bt.note}</p>
               </div>
+            </div>
+          </section>
+        )}
+        {replay && (
+          <section className="panel">
+            <div className="ph">
+              <h2>When the station feed is down</h2>
+              <span className="meta">{replay.origins} forecasts, {dayShort(replay.train_end)} to {dayShort(replay.test_end)}, real CPCB data</span>
+            </div>
+            <div className="pb grid-case">
+              <table className="tbl">
+                <thead><tr><th>Forecast made with</th><th>Error, next 24 h</th><th>Error, 25–48 h</th></tr></thead>
+                <tbody>
+                  {([["real", "Real readings (no outage)"], ["filled", "Last 4 days filled from corrected CAMS"], ["cams_direct", "Corrected CAMS on its own"], ["last_value", "Last real value carried forward"]] as const).map(([k, label]) => {
+                    const m = (replay.metrics as unknown as Record<string, Record<string, { mae_model: number }>>)[k];
+                    return m ? <tr key={k}><td>{label}</td><td className="tab">{n(m["1-24"]?.mae_model)} µg/m³</td><td className="tab">{n(m["25-48"]?.mae_model)} µg/m³</td></tr> : null;
+                  })}
+                </tbody>
+              </table>
+              <p className="small muted" style={{ margin: 0 }}>We hid the last 4 days of every station before each forecast and filled them from Copernicus CAMS, corrected against each station&apos;s own history, then compared the forecast with what the stations measured. This is how much the fill costs when the CPCB feed stops. {replay.note}</p>
             </div>
           </section>
         )}

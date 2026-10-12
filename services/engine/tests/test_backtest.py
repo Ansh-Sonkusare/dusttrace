@@ -50,3 +50,16 @@ def test_metrics_on_a_toy_series():
     assert m["1-24"]["f1_exceed_persistence"] == 0
     assert m["25-48"]["coverage_10_90"] == 0.5
     assert m["25-48"]["n"] == 2
+
+
+def test_outage_replay_scores_the_fill_against_real_data(data):
+    rd, wx = data
+    rd = rd.dropna(subset=["pm10"])
+    model_pm = rd.groupby("ts")["pm10"].mean() * 0.6  # a model that reads 40% low
+    cams_df = pd.concat([pd.DataFrame({"station_id": s, "ts": model_pm.index, "pm10": model_pm.to_numpy()})
+                         for s in rd["station_id"].unique()])
+    res = backtest.outage_replay(rd, cams_df, wx, START, START + pd.Timedelta(days=6), outage_h=96)
+    assert set(res["metrics"]) == {"real", "filled", "cams_direct", "last_value"}
+    for m in res["metrics"].values():
+        assert set(m) == {"1-24", "25-48"} and m["1-24"]["n"] > 0
+    assert res["outage_hours"] == 96 and res["origins"] == 5

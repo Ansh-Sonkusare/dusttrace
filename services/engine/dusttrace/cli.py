@@ -7,6 +7,7 @@
   run       train, forecast 48 h, plumes, Safe-Work Windows
   backtest  replay the last N days with only past data visible (--days N)
   discover  Sentinel-2 change detection: possible unregistered sites (needs network)
+  replay-outage  verify the CAMS fill: hide 4 days before each forecast and score it (--days N)
   all       init-db, seed, ingest, run
 """
 
@@ -33,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     ing.add_argument("--days", type=int, default=420)
     sub.add_parser("run")
     sub.add_parser("discover")
+    ro = sub.add_parser("replay-outage")
+    ro.add_argument("--days", type=int, default=30)
     bt = sub.add_parser("backtest")
     bt.add_argument("--days", type=int, default=60)
     al = sub.add_parser("all")
@@ -51,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
             print("receptors from OSM:", pipeline.load_receptors_osm(conn, settings))
         if args.cmd in ("ingest", "all"):
             print("ingest:", json.dumps(pipeline.ingest(conn, settings, args.mode, args.days)))
+        if args.cmd == "replay-outage":
+            print("replay:", json.dumps(pipeline.replay_outage(conn, settings, args.days), indent=2, default=str))
         if args.cmd == "discover":
             print("discover:", json.dumps(pipeline.discover_sites(conn, settings), indent=2, default=str))
         if args.cmd == "backtest":

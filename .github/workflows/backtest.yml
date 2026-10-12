@@ -9,6 +9,9 @@ on:
       days:
         description: "Days to replay"
         default: "60"
+      kind:
+        description: "standard, or outage (verify the CAMS fill)"
+        default: "standard"
 
 jobs:
   backtest:
@@ -26,4 +29,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: python -m dusttrace init-db && python -m dusttrace backtest --days "${{ inputs.days || '60' }}"
+      - run: python -m dusttrace init-db
+      - if: ${{ inputs.kind != 'outage' }}
+        run: python -m dusttrace backtest --days "${{ inputs.days || '60' }}"
+      - if: ${{ inputs.kind == 'outage' }}
+        run: python -m dusttrace replay-outage --days "${{ inputs.days || '30' }}"
