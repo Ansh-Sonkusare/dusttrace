@@ -186,7 +186,7 @@ def rank_sites(conn, ward_id: str, sites: pd.DataFrame, station_ids: list[str], 
 
 
 def score_sites(conn, ward_id: str, ranked, audits) -> dict:
-    """Dust Score (F8) per site. Windows followed stays unknown until plans can be accepted (#9)."""
+    """Dust Score (F8) per site. Windows followed comes from accepted site-manager plans (F7)."""
     trust = {a.site_id: a.score for a in audits}
     signals = db.site_signals(conn, ward_id)
     followed = db.windows_followed(conn, ward_id)

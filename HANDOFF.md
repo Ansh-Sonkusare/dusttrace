@@ -126,7 +126,7 @@ Use at least 420 days of history. With 120 days the holdout crosses a season cha
 3. **Deploy the console** on Vercel, root `apps/web`, env `DATABASE_URL` and `DUSTTRACE_PASSWORD` (the console returns 503 in production without it). Officers use `/officer` on their phones; outcomes feed the next run's ranking (past violations) and the agent (D8/D9).
 4. **Calibrate:** compare plume increments with station deltas downwind of real sites, tune the emission factors, and reach about 80% coverage for the quantile band.
 5. **Agent cases (PRD D1–D10):** the inspection case builder ranks sites, checks the sensor, satellite and bus evidence, proposes actions, and needs an officer's sign-off.
-6. **Site-manager view:** a mobile web page that takes tomorrow's windows from `/api/run`, with an "Accept plan" button.
+6. **Site-manager view:** done: `/plan/[siteId]?t=…` (HMAC link per site, `PLAN_SECRET` in production; the console's site page shows the link). Next 24 h holds, best hours, misting from 90 min before each hold, and "Accept plan" (`plan_acceptances`), which feeds "windows followed" in the Dust Score. Next: send the link on WhatsApp.
 7. **Resident QR page:** a public Dust Score for each site, plus a report form.
 8. **Round 2 report (Dec 1):** use real metrics from step 2, screenshots from `docs/screens/`, and the plume method above. Keep the "demo" and "simulated pilot" labels honest.
 

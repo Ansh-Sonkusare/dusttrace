@@ -185,3 +185,20 @@ def test_run_scores_every_site_and_counts_citizen_reports(conn, settings):
     assert rows["D"][3]["trust"] == 0   # no monitor
     rank_c = one(conn, "select components->>'reports' from inspection_rank where run_id=%s and site_id='C'", (out["run_id"],))
     assert float(rank_c[0]) > 0
+
+
+def test_accepted_plans_count_as_windows_followed(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    out = pipeline.run(conn, settings)
+    conn.execute("insert into safe_windows (run_id, site_id, ts, status, reason) "
+                 "select %s, 'A', now() + interval '30 days', 'avoid', 'test' "
+                 "where not exists (select 1 from safe_windows where run_id=%s and site_id='A' and status='avoid')",
+                 (out["run_id"], out["run_id"]))
+    conn.commit()
+    assert db.windows_followed(conn, "K-East")["A"] == 0.0
+    conn.execute("insert into plan_acceptances (site_id, run_id, avoid_hours) values ('A', %s, 3)", (out["run_id"],))
+    conn.commit()
+    assert db.windows_followed(conn, "K-East")["A"] == 1.0
+    second = pipeline.run(conn, settings)
+    comp = one(conn, "select components->>'windows' from dust_scores where run_id=%s and site_id='A'", (second["run_id"],))
+    assert float(comp[0]) == 20.0
