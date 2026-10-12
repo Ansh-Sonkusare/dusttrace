@@ -273,3 +273,27 @@ def test_osm_sites_fall_back_to_ohsome_when_overpass_is_down(monkeypatch):
     monkeypatch.setattr(ohsome, "fetch_sites", lambda bbox, **k: ohsome.parse_sites(load("ohsome_construction.json")))
     sites, source = pipeline.fetch_osm_sites([72.835, 19.09, 72.91, 19.14])
     assert source == "ohsome" and len(sites) == 4
+
+
+def test_ohsome_area_by_cell_batches_and_parses():
+    from dusttrace.sources import ohsome
+    seen = []
+
+    def handler(req):
+        body = dict(httpx.QueryParams(req.content.decode()))
+        ids = [b.split(":")[0] for b in body["bboxes"].split("|")]
+        seen.append(len(ids))
+        return httpx.Response(200, json={"groupByResult": [
+            {"groupByObject": i, "result": [{"timestamp": "2026-07-27T09:00:00Z", "value": 100.0 * n}]} for n, i in enumerate(ids)]})
+    cells = [{"id": f"c{n}", "bbox": [72.8, 19.1, 72.81, 19.11]} for n in range(5)]
+    areas = ohsome.area_by_cell(cells, client=httpx.Client(transport=httpx.MockTransport(handler)), batch=2)
+    assert seen == [2, 2, 1] and areas == {"c0": 0.0, "c1": 100.0, "c2": 0.0, "c3": 100.0, "c4": 0.0}
+
+
+def test_an_empty_overpass_answer_falls_back_to_ohsome(monkeypatch):
+    # Seen on Oct 12: the mail.ru mirror answered 200 with no usable sites for a ward with ~22.
+    from dusttrace.sources import ohsome
+    monkeypatch.setattr(overpass, "fetch_sites", lambda bbox, **k: [])
+    monkeypatch.setattr(ohsome, "fetch_sites", lambda bbox, **k: ohsome.parse_sites(load("ohsome_construction.json")))
+    sites, source = pipeline.fetch_osm_sites([72.835, 19.09, 72.91, 19.14])
+    assert source == "ohsome" and len(sites) == 4

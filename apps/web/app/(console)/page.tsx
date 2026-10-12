@@ -1,4 +1,5 @@
 import TopBar from "@/components/TopBar";
+import { siteLabel } from "@/lib/sites";
 import DustMap from "@/components/DustMap";
 import NoRun from "@/components/Empty";
 import Link from "next/link";
@@ -78,7 +79,7 @@ export default async function Overview() {
                       <Link href={`/sites/${site.id}`} className="item">
                         <span className="bar" style={{ background: "var(--avoid)" }} />
                         <div>
-                          <div className="hd"><b>{site.id} · {site.name}</b></div>
+                          <div className="hd"><b>{siteLabel(site.id, site.name)}</b></div>
                           <div className="small" style={{ marginTop: 2 }}>Avoid {dayHour(sp.from)}–{hhmm(new Date(new Date(sp.to).getTime() + 3600_000).toISOString())}</div>
                           <p>{sp.rows[0].reason}</p>
                         </div>

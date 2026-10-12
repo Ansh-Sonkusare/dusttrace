@@ -37,13 +37,18 @@ def _ist(ts) -> str:
     return (pd.Timestamp(ts) + pd.Timedelta(hours=5.5)).strftime("%H:%M")
 
 
+def site_label(site_id: str, name: str) -> str:
+    """Demo sites have one-letter codes worth showing; real sites (osm-…, sat-…) go by their name."""
+    return f"{site_id} · {name}" if len(site_id) <= 3 else name
+
+
 def derive(states: list[SiteState]) -> list[Alert]:
     out: list[Alert] = []
     for s in states:
         c, d = s.ctx, s.decision
         if d is None:
             continue
-        name = f"{c.site_id} · {c.name}"
+        name = site_label(c.site_id, c.name)
         if "forecast_spike" in d.triggers and not c.has_relay and not s.plan_accepted:
             out.append(Alert("critical", c.site_id, s.case_id,
                              f"{name}: spike from {_ist(min(c.spike_hours))} and no misting arranged",
@@ -57,7 +62,7 @@ def derive(states: list[SiteState]) -> list[Alert]:
             places = sorted({n for _, n in c.sensitive_avoid})
             first = min(t for t, _ in c.sensitive_avoid)
             out.append(Alert("receptor", c.site_id, s.case_id,
-                             f"{', '.join(places[:2])} downwind of {c.site_id} from {_ist(first)}",
+                             f"{', '.join(places[:2])} downwind of {c.site_id if len(c.site_id) <= 3 else c.name} from {_ist(first)}",
                              "School or hospital told to close windows and run purifiers during the window."))
         if "sensor_audit" in d.triggers:
             out.append(Alert("sensor", c.site_id, s.case_id,

@@ -1,5 +1,6 @@
 "use client";
 
+import { mapCode } from "@/lib/sites";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MLMap } from "maplibre-gl";
@@ -53,8 +54,10 @@ export default function DustMap({ center, sites, receptors, stations, hours }: {
         type: "geojson",
         data: { type: "FeatureCollection", features: receptors.map((r) => ({ type: "Feature", properties: { name: r.name, kind: r.kind }, geometry: { type: "Point", coordinates: [r.lon, r.lat] } })) },
       });
-      m.addLayer({ id: "receptors", type: "circle", source: "receptors", paint: { "circle-radius": 5, "circle-color": "#F2F2F2", "circle-stroke-color": "#0B0B0C", "circle-stroke-width": 2 } });
-      m.addLayer({ id: "receptor-labels", type: "symbol", source: "receptors", minzoom: 14, layout: { "text-field": ["get", "name"], "text-size": 11, "text-offset": [0, 1.2], "text-anchor": "top", "text-optional": true, "text-font": ["Noto Sans Regular"] }, paint: { "text-color": "#A3A3A8", "text-halo-color": "#0B0B0C", "text-halo-width": 1.5 } });
+      // Estimated homes (one dot per ~250 m cell) sit quietly under the schools and hospitals.
+      m.addLayer({ id: "homes", type: "circle", source: "receptors", filter: ["==", ["get", "kind"], "housing"], paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 1.5, 16, 4], "circle-color": "#6F6F75", "circle-opacity": 0.7 } });
+      m.addLayer({ id: "receptors", type: "circle", source: "receptors", filter: ["!=", ["get", "kind"], "housing"], paint: { "circle-radius": 5, "circle-color": "#F2F2F2", "circle-stroke-color": "#0B0B0C", "circle-stroke-width": 2 } });
+      m.addLayer({ id: "receptor-labels", type: "symbol", source: "receptors", minzoom: 14, filter: ["!=", ["get", "kind"], "housing"], layout: { "text-field": ["get", "name"], "text-size": 11, "text-offset": [0, 1.2], "text-anchor": "top", "text-optional": true, "text-font": ["Noto Sans Regular"] }, paint: { "text-color": "#A3A3A8", "text-halo-color": "#0B0B0C", "text-halo-width": 1.5 } });
 
       m.addSource("stations", {
         type: "geojson",
@@ -64,7 +67,7 @@ export default function DustMap({ center, sites, receptors, stations, hours }: {
 
       m.addSource("sites", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       m.addLayer({ id: "sites", type: "circle", source: "sites", paint: { "circle-radius": 11, "circle-color": ["get", "color"], "circle-stroke-color": "#0B0B0C", "circle-stroke-width": 3 } });
-      m.addLayer({ id: "site-labels", type: "symbol", source: "sites", layout: { "text-field": ["get", "id"], "text-size": 12, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true }, paint: { "text-color": "#0B0B0C" } });
+      m.addLayer({ id: "site-labels", type: "symbol", source: "sites", layout: { "text-field": ["get", "code"], "text-size": 12, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true }, paint: { "text-color": "#0B0B0C" } });
       setReady(true);
     });
     map.current = m;
@@ -83,7 +86,7 @@ export default function DustMap({ center, sites, receptors, stations, hours }: {
       type: "FeatureCollection",
       features: sites.map((s) => ({
         type: "Feature",
-        properties: { id: s.id, color: STATUS_COLOR[h.status[s.id] ?? "go"] },
+        properties: { id: s.id, code: mapCode(s.id), color: STATUS_COLOR[h.status[s.id] ?? "go"] },
         geometry: { type: "Point", coordinates: [s.lon, s.lat] },
       })),
     });
@@ -119,7 +122,8 @@ export default function DustMap({ center, sites, receptors, stations, hours }: {
         <span style={{ marginLeft: "auto" }}><i className="dot" style={{ background: STATUS_COLOR.avoid }} /> Avoid {counts.avoid}</span>
         <span><i className="dot" style={{ background: STATUS_COLOR.caution }} /> Caution {counts.caution}</span>
         <span><i className="dot" style={{ background: STATUS_COLOR.go }} /> Go {counts.go}</span>
-        <span><i className="dot" style={{ background: "#F2F2F2" }} /> School, hospital, housing</span>
+        <span><i className="dot" style={{ background: "#F2F2F2" }} /> School, hospital</span>
+        <span><i className="dot" style={{ background: "#6F6F75" }} /> Homes</span>
         <span><i className="dot" style={{ background: "#86BDB9" }} /> Station</span>
         <span><i className="dot" style={{ background: "#E0A245", opacity: 0.4 }} /> Plume above 25 µg/m³ added</span>
       </div>

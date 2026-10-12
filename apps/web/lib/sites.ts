@@ -41,3 +41,7 @@ export function candidateSite(c: { id: number; lat: number; lon: number; area_m2
     area_m2: Math.round(c.area_m2),
   };
 }
+
+// Demo sites have one-letter codes worth showing; real sites (osm-…, sat-…) go by their name.
+export const siteLabel = (id: string, name: string) => (id.length <= 3 ? `${id} · ${name}` : name);
+export const mapCode = (id: string) => (id.length <= 3 ? id : "");

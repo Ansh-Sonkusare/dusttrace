@@ -3,7 +3,7 @@ import TopBar from "@/components/TopBar";
 import NoRun from "@/components/Empty";
 import { getCandidates, getLatestRun, getRanking, getWard } from "@/lib/queries";
 import { decideCandidate } from "@/lib/actions";
-import { sourceLabel } from "@/lib/sites";
+import { sourceLabel, siteLabel } from "@/lib/sites";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +46,7 @@ export default async function InspectPage() {
                       <div>
                         <div className="hd">
                           <b className="tab">{r.rank}</b>
-                          <b>{r.site_id} · {r.name}</b>
+                          <b>{siteLabel(r.site_id, r.name)}</b>
                           {sourceLabel(r) && <span className="pill">{sourceLabel(r)}</span>}
                           <span className="tab" style={{ marginLeft: "auto" }}>{Math.round(r.score)} {Math.round(r.score) === 1 ? "point" : "points"}</span>
                         </div>

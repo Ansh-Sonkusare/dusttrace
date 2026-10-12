@@ -53,3 +53,13 @@ def test_quiet_site_raises_nothing_and_order_is_by_severity():
     out = alerts.derive([case(trust=30.0, sensitive_avoid=[(SPIKE[0], "School")], has_relay=False,
                               spike_hours=SPIKE, spike_receptors=["School"])])
     assert [a.kind for a in out] == sorted([a.kind for a in out], key=alerts.SEVERITY.index)
+
+
+def test_real_sites_are_named_not_shown_by_their_long_id():
+    out = alerts.derive([case(site_id="osm-way-554967617", name="Metro Casting Yard", has_sensor=False,
+                              sensor_known=False, has_relay=False, trust=None,
+                              sensitive_avoid=[(SPIKE[0], "Marol Maternity Home")])])
+    rec = next(a for a in out if a.kind == "receptor")
+    assert rec.title.startswith("Marol Maternity Home downwind of Metro Casting Yard from")
+    assert "osm-way" not in rec.title and rec.site_id == "osm-way-554967617"
+    assert alerts.site_label("A", "Metro Line 7A excavation") == "A · Metro Line 7A excavation"

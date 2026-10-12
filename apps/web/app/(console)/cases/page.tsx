@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { siteLabel } from "@/lib/sites";
 import TopBar from "@/components/TopBar";
 import NoRun from "@/components/Empty";
 import { decideAction } from "@/lib/actions";
@@ -51,7 +52,7 @@ export default async function CasesPage() {
           return (
             <section key={c.id} className="panel">
               <div className="ph">
-                <h2><Link href={`/sites/${c.site_id}`}>{c.site_id} · {c.site_name}</Link></h2>
+                <h2><Link href={`/sites/${c.site_id}`}>{siteLabel(c.site_id, c.site_name)}</Link></h2>
                 <span className="meta">{caseId(c.id)} · opened {dayHour(c.opened_at)} · <span className="pill">{STATE_LABEL[c.state] ?? c.state}</span></span>
               </div>
               <div className="pb grid-case">

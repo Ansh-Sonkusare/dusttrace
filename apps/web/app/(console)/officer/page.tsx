@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { siteLabel } from "@/lib/sites";
 import TopBar from "@/components/TopBar";
 import NoRun from "@/components/Empty";
 import { logOutcome } from "@/lib/actions";
@@ -31,7 +32,7 @@ export default async function OfficerPage() {
             return (
               <li key={r.site_id} className="panel stop">
                 <div className="ph">
-                  <h2><span className="tab muted">{i + 1}.</span> {r.site_id} · {r.name}</h2>
+                  <h2><span className="tab muted">{i + 1}.</span> {siteLabel(r.site_id, r.name)}</h2>
                   <span className="meta">rank {r.rank} · {Math.round(r.score)} points</span>
                 </div>
                 <div className="pb">
@@ -63,7 +64,7 @@ export default async function OfficerPage() {
             {recent.length === 0 ? <p className="small muted">No outcomes logged yet.</p> : (
               <table className="tbl"><thead><tr><th>When</th><th>Site</th><th>Outcome</th><th>Note</th></tr></thead>
                 <tbody>{recent.map((x) => (
-                  <tr key={x.id}><td>{dayHour(x.at)}</td><td>{x.site_id} · {x.site_name}</td>
+                  <tr key={x.id}><td>{dayHour(x.at)}</td><td>{siteLabel(x.site_id, x.site_name)}</td>
                     <td>{OUTCOMES[x.outcome as keyof typeof OUTCOMES] ?? x.outcome}</td><td className="muted">{x.note}</td></tr>
                 ))}</tbody></table>
             )}

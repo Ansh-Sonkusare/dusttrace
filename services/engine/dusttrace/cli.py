@@ -4,6 +4,7 @@
   seed      load the ward, seed stations, demo sites and receptors
   osm       replace demo receptors with real OSM schools and hospitals (needs network)
   osm-sites add construction sites mapped in OSM inside the ward (needs network)
+  osm-housing  estimated housing exposure: Census 2011 people over OSM residential land (needs network)
   ingest    load weather + readings (--mode auto|live|synthetic, --days N)
   run       train, forecast 48 h, plumes, Safe-Work Windows
   backtest  replay the last N days with only past data visible (--days N)
@@ -32,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("seed")
     sub.add_parser("osm")
     sub.add_parser("osm-sites")
+    sub.add_parser("osm-housing")
     ing = sub.add_parser("ingest")
     ing.add_argument("--mode", choices=["auto", "live", "synthetic"], default="auto")
     ing.add_argument("--days", type=int, default=420)
@@ -56,6 +58,11 @@ def main(argv: list[str] | None = None) -> int:
             print("seeded ward, stations, sites, receptors")
         if args.cmd == "osm":
             print("receptors from OSM:", pipeline.load_receptors_osm(conn, settings))
+        if args.cmd == "osm-housing":
+            h = pipeline.load_housing_osm(conn, settings)
+            print(f"housing: {h['receptors']} cells, {h['residential_km2']} km² of homes in the ward, "
+                  f"{h['people_per_km2_of_homes']:,} people per km² of homes; estimate in the ward "
+                  f"{h['population_in_ward']:,} vs census 2011 {h['census_2011']:,}")
         if args.cmd == "osm-sites":
             print("construction sites from OSM:", pipeline.load_sites_osm(conn, settings))
         if args.cmd in ("ingest", "all"):
