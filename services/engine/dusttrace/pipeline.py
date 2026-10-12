@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import timedelta
 
+import httpx
 import pandas as pd
 
 from psycopg.types.json import Jsonb
@@ -13,7 +14,7 @@ from psycopg.types.json import Jsonb
 from . import agent, alerts, attribution, audit, backtest as bt, db, dust_score, fill, forecast, windows
 from . import verify as verify_mod
 from .config import Settings, load_seed
-from .sources import cams, openaq, openmeteo, overpass, synthetic
+from .sources import cams, ohsome, openaq, openmeteo, overpass, synthetic
 
 log = logging.getLogger("dusttrace")
 
@@ -142,12 +143,22 @@ def load_receptors_osm(conn, settings: Settings) -> int:
     return len(recs)
 
 
+def fetch_osm_sites(bbox: list[float]) -> tuple[list[dict], str]:
+    """Construction sites from Overpass, or from the ohsome snapshot when every mirror is down."""
+    try:
+        return overpass.fetch_sites(bbox), "overpass"
+    except (httpx.HTTPError, ValueError) as e:
+        log.warning("Overpass unavailable (%s); using the ohsome snapshot", e)
+        return ohsome.fetch_sites(bbox), "ohsome"
+
+
 def load_sites_osm(conn, settings: Settings) -> int:
     """Construction sites mapped in OpenStreetMap inside the ward (issue #30). Real, not demo."""
     seed = load_seed()
-    sites = overpass.fetch_sites(seed["ward"]["bbox"])
+    sites, source = fetch_osm_sites(seed["ward"]["bbox"])
     db.upsert_sites(conn, sites, seed["ward"]["id"])
     conn.commit()
+    log.info("%d construction sites from %s", len(sites), source)
     return len(sites)
 
 

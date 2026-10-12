@@ -32,8 +32,14 @@ jobs:
           cache: pip
       - if: steps.gate.outputs.ok == 'true'
         run: pip install -e .
-      - if: steps.gate.outputs.ok == 'true'
-        run: python -m dusttrace init-db && python -m dusttrace osm
-      - name: Construction sites
+      - name: Migrations
         if: steps.gate.outputs.ok == 'true'
+        run: python -m dusttrace init-db
+      - name: Schools and hospitals
+        if: steps.gate.outputs.ok == 'true'
+        run: python -m dusttrace osm
+      - name: Construction sites
+        # Runs even when the receptor pull fails: the two are independent, and the site pull
+        # falls back to the ohsome snapshot when every Overpass mirror is down.
+        if: ${{ !cancelled() && steps.gate.outputs.ok == 'true' }}
         run: python -m dusttrace osm-sites

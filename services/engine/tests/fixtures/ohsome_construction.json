@@ -1,0 +1,226 @@
+{
+ "attribution": {
+  "url": "https://ohsome.org/copyrights",
+  "text": "\u00a9 OpenStreetMap contributors"
+ },
+ "apiVersion": "1.10.4",
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8848631,
+       19.0966156
+      ],
+      [
+       72.8852438,
+       19.0966156
+      ],
+      [
+       72.8852438,
+       19.0967934
+      ],
+      [
+       72.8848631,
+       19.0967934
+      ],
+      [
+       72.8848631,
+       19.0966156
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/353149979",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "building": "construction"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8718493,
+       19.1048496
+      ],
+      [
+       72.8734249,
+       19.1048496
+      ],
+      [
+       72.8734249,
+       19.1073258
+      ],
+      [
+       72.8718493,
+       19.1073258
+      ],
+      [
+       72.8718493,
+       19.1048496
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/1122603587",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "landuse": "construction"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8952735,
+       19.114711
+      ],
+      [
+       72.8969013,
+       19.114711
+      ],
+      [
+       72.8969013,
+       19.1156581
+      ],
+      [
+       72.8952735,
+       19.1156581
+      ],
+      [
+       72.8952735,
+       19.114711
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/1531594092",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "landuse": "construction",
+    "name": "The Seasons"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8821957,
+       19.1294988
+      ],
+      [
+       72.8840411,
+       19.1294988
+      ],
+      [
+       72.8840411,
+       19.1311983
+      ],
+      [
+       72.8821957,
+       19.1311983
+      ],
+      [
+       72.8821957,
+       19.1294988
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/554967617",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "landuse": "construction",
+    "name": "Metro Casting Yard"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8542756,
+       19.1303319
+      ],
+      [
+       72.8542756,
+       19.1303319
+      ],
+      [
+       72.8542756,
+       19.1303319
+      ],
+      [
+       72.8542756,
+       19.1303319
+      ],
+      [
+       72.8542756,
+       19.1303319
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "node/3700829158",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "building": "construction",
+    "name": "Volkswagen Service"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8590742,
+       19.1045596
+      ],
+      [
+       72.8595105,
+       19.1045596
+      ],
+      [
+       72.8595105,
+       19.1048963
+      ],
+      [
+       72.8590742,
+       19.1048963
+      ],
+      [
+       72.8590742,
+       19.1045596
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/1458027984",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "building": "construction",
+    "building:levels": "13",
+    "construction": "apartments",
+    "roof:shape": "flat"
+   }
+  }
+ ]
+}
