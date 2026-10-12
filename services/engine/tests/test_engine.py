@@ -297,3 +297,25 @@ def test_an_empty_overpass_answer_falls_back_to_ohsome(monkeypatch):
     monkeypatch.setattr(ohsome, "fetch_sites", lambda bbox, **k: ohsome.parse_sites(load("ohsome_construction.json")))
     sites, source = pipeline.fetch_osm_sites([72.835, 19.09, 72.91, 19.14])
     assert source == "ohsome" and len(sites) == 4
+
+
+def test_ohsome_receptors_follow_the_overpass_rules():
+    from dusttrace.sources import ohsome
+    recs = {r["id"]: r for r in ohsome.parse_receptors(load("ohsome_receptors.json"))}
+    # schools and kindergartens kept (unnamed ones too); colleges aren't receptors; only named inpatient hospitals
+    assert set(recs) == {"osm-way-345152623", "osm-way-144524310", "osm-node-245668712", "osm-node-1345329154",
+                         "osm-node-4529961390", "osm-node-6795476290", "osm-way-353174274", "osm-node-1347550460"}
+    assert recs["osm-node-1345329154"]["kind"] == "school" and recs["osm-way-353174274"]["kind"] == "hospital"
+    assert recs["osm-way-144524310"]["name"] == "Unnamed school"
+    assert 19.09 < recs["osm-way-345152623"]["lat"] < 19.1 and recs["osm-way-345152623"]["source"] == "osm"
+
+
+def test_receptors_fall_back_to_ohsome_when_overpass_is_down(monkeypatch):
+    from dusttrace.sources import ohsome
+
+    def down(*a, **k):
+        raise httpx.ConnectError("all mirrors down")
+    monkeypatch.setattr(overpass, "fetch", down)
+    monkeypatch.setattr(ohsome, "fetch_receptors", lambda bbox, **k: ohsome.parse_receptors(load("ohsome_receptors.json")))
+    recs, source = pipeline.fetch_osm_receptors([72.835, 19.09, 72.91, 19.14])
+    assert source == "ohsome" and len(recs) == 8

@@ -136,3 +136,55 @@ def test_a_site_whose_feed_is_not_connected_is_not_treated_as_unmonitored():
     d = agent.decide(ctx(site_id="osm-way-1", has_sensor=False, sensor_known=False, has_relay=False, trust=None,
                          sensitive_avoid=[(SPIKE[0], "School")]))
     assert "unsensored_site" not in d.triggers and "site registry" not in d.signals
+
+
+# F10 playbook (issue #34): cause from the PM10/PM2.5 signature, and the fix sent to the site.
+RECEPTORS = ["Homes for about 900 people (estimated)"]
+
+
+def top(d):
+    return d.hypotheses[0][0]
+
+
+def test_coarse_dust_in_working_hours_points_to_digging_or_demolition():
+    d = agent.decide(ctx(activity="structure", spike_hours=SPIKE, spike_receptors=RECEPTORS, pm_signature="coarse_work"))
+    base = agent.decide(ctx(activity="structure", spike_hours=SPIKE, spike_receptors=RECEPTORS))
+    h, b = dict(d.hypotheses), dict(base.hypotheses)
+    assert h["dry_excavation"] > b["dry_excavation"] and h["demolition"] > b["demolition"]
+    assert "coarse" in d.what_changed.lower() or any("coarse" in a.reason.lower() for a in d.final)
+
+
+def test_coarse_dust_at_night_points_to_truck_trackout_and_orders_a_wheel_wash():
+    d = agent.decide(ctx(activity="excavation", spike_hours=SPIKE, spike_receptors=RECEPTORS, pm_signature="coarse_night"))
+    assert top(d) == "truck_trackout"
+    a = actions(d)["ORDER_WHEEL_WASH"]
+    assert a.route == "site" and a.rule == "F10" and a.status == "sent" and "night" in a.reason
+
+
+def test_fine_dust_leans_to_a_non_construction_source_without_dropping_site_actions():
+    d = agent.decide(ctx(spike_hours=SPIKE, spike_receptors=RECEPTORS, pm_signature="fine"))
+    base = agent.decide(ctx(spike_hours=SPIKE, spike_receptors=RECEPTORS))
+    assert dict(d.hypotheses)["non_construction"] > dict(base.hypotheses)["non_construction"]
+    assert "REFER_NON_CONSTRUCTION" not in actions(d)  # D10 still needs evidence beyond one station
+    assert "ISSUE_SAFE_WORK_WINDOW" in actions(d)
+
+
+def test_uncovered_debris_gets_a_cover_order_with_a_two_hour_deadline():
+    d = agent.decide(ctx(activity="debris", has_sensor=True, sensor_hot_hours=1))
+    assert top(d) == "uncovered_debris"
+    a = actions(d)["ORDER_COVER_DEBRIS"]
+    assert a.rule == "F10" and a.route == "site" and a.deadline == NOW + pd.Timedelta(hours=2)
+
+
+def test_dry_windy_day_ahead_means_pre_wet_even_without_a_spike():
+    windy = [NOW + pd.Timedelta(hours=h) for h in (14, 15)]
+    d = agent.decide(ctx(activity="excavation", dry_windy_hours=windy))
+    assert d is not None and "dry_windy" in d.triggers
+    a = actions(d)["PRE_WET_SITE"]
+    assert a.rule == "F10" and "wind" in a.reason.lower()
+    assert agent.decide(ctx(activity="structure", dry_windy_hours=windy)) is None  # finishing work raises little dust
+
+
+def test_playbook_actions_are_dropped_for_a_non_construction_source():
+    d = agent.decide(ctx(activity="debris", sensor_hot_hours=1, non_construction=True))
+    assert not {"ORDER_COVER_DEBRIS", "ORDER_WHEEL_WASH", "PRE_WET_SITE"} & set(actions(d))

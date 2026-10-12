@@ -357,3 +357,21 @@ def test_real_housing_replaces_demo_housing_but_not_demo_schools(conn, settings,
     out2 = pipeline.load_housing_osm(conn, settings)
     assert out2["receptors"] == 1
     assert one(conn, "select count(*) from receptors where kind='housing' and source='osm'")[0] == 1
+
+
+def test_a_coarse_spike_at_a_real_station_reaches_the_agent(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    # A fresh real station next to Site A whose last hours show PM10 up far more than PM2.5.
+    db.upsert_station(conn, {"id": "openaq-9", "name": "Chakala test", "source": "openaq", "lat": 19.1175, "lon": 72.8565}, "K-East")
+    ts = pd.date_range(end=pipeline.now_hour(), periods=24 * 40, freq="h", tz="UTC")
+    pm10 = np.full(len(ts), 60.0)
+    pm25 = pm10 * 0.4
+    pm10[-3:], pm25[-3:] = 170.0, 34.0
+    db.write_readings(conn, pd.DataFrame({"station_id": "openaq-9", "ts": ts, "pm10": pm10, "pm25": pm25}), synthetic=False)
+    conn.commit()
+    out = pipeline.run(conn, settings)
+    sig = out["metrics"]["signatures"]["openaq-9"]
+    assert sig["signature"] in ("coarse_work", "coarse_night") and sig["ratio"] < 0.8 * sig["base_ratio"]
+    hyp = one(conn, """select hypotheses from cases where site_id='A' and closed_at is null""")[0]
+    assert hyp  # the case exists; the signature moved its causes
+    assert "dry_windy_hours" in one(conn, "select metrics from runs where id=%s", (out["run_id"],))[0]

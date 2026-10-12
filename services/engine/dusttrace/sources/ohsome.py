@@ -10,6 +10,7 @@ import math
 import httpx
 
 from . import http
+from . import overpass
 from .overpass import SITE_AREA, _activity
 
 URL = "https://api.ohsome.org/v1/elements/bbox"  # each element's bounding box; /geometry is refused here
@@ -75,3 +76,32 @@ def area_by_cell(cells: list[dict], filter_: str = "landuse=residential", client
         r = http.post(c, AREA_URL, data={"bboxes": boxes, "filter": filter_})
         out.update(parse_areas(r.json()))
     return out
+
+
+RECEPTOR_FILTER = "amenity in (school, kindergarten, hospital)"
+
+
+def to_elements(payload: dict) -> dict:
+    """ohsome features -> Overpass-style elements (type, id, centre, tags), so Overpass's rules apply."""
+    els = []
+    for f in payload.get("features") or []:
+        p, g = f.get("properties") or {}, f.get("geometry") or {}
+        kind, _, num = str(p.get("@osmId", "")).partition("/")
+        if not num or g.get("type") not in ("Polygon", "Point"):
+            continue
+        pts = g["coordinates"][0] if g["type"] == "Polygon" else [g["coordinates"]]
+        lons, lats = [q[0] for q in pts], [q[1] for q in pts]
+        els.append({"type": kind, "id": int(num),
+                    "center": {"lat": (min(lats) + max(lats)) / 2, "lon": (min(lons) + max(lons)) / 2},
+                    "tags": {k: v for k, v in p.items() if not k.startswith("@")}})
+    return {"elements": els}
+
+
+def parse_receptors(payload: dict) -> list[dict]:
+    return overpass.parse(to_elements(payload))
+
+
+def fetch_receptors(bbox: list[float], client: httpx.Client | None = None) -> list[dict]:
+    c = client or httpx.Client(timeout=180)
+    r = http.post(c, URL, data={"bboxes": ",".join(str(v) for v in bbox), "filter": RECEPTOR_FILTER, "properties": "tags"})
+    return parse_receptors(r.json())
