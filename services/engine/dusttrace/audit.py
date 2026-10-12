@@ -283,3 +283,19 @@ def benchmark(ambient: pd.Series, wx: pd.DataFrame, as_of: pd.Timestamp, n: int 
         "recall": round(tp / (tp + fn), 3) if tp + fn else 1.0,
         "detected": {f: round(sum(v) / len(v), 2) for f, v in by_fault.items()},
     }
+
+
+def hot_hours(readings: pd.DataFrame, ambient: pd.Series, as_of: pd.Timestamp) -> dict[str, int]:
+    """Per sensor: the latest working hours in a row, up to `as_of`, reading above twice the ambient (D4)."""
+    out = {}
+    for sid, g in readings[readings["ts"] <= as_of].sort_values("ts").groupby("sensor_id"):
+        ts = pd.DatetimeIndex(g["ts"])
+        amb = ambient.reindex(ts).interpolate(limit_direction="both").to_numpy(dtype=float)
+        hot = (g["pm10"].to_numpy(dtype=float) > 2 * amb) & _working(ts)
+        n = 0
+        for h in hot[::-1]:
+            if not h:
+                break
+            n += 1
+        out[str(sid)] = n
+    return out

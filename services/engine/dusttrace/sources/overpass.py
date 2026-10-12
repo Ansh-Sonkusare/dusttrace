@@ -73,7 +73,8 @@ def parse(payload: dict) -> list[dict]:
             "source": "osm",
         }
         # The same school is often mapped as both its grounds (way) and a point (node).
-        if any(o["name"] == rec["name"] and o["kind"] == kind and _metres(o, rec) < SAME_PLACE_M for o in out):
+        if any(o["name"].casefold() == rec["name"].casefold() and o["kind"] == kind
+               and _metres(o, rec) < SAME_PLACE_M for o in out):
             continue
         out.append(rec)
     return out

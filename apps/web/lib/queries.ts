@@ -168,3 +168,27 @@ export async function getRanking(runId: number): Promise<RankRow[]> {
     [runId],
   );
 }
+
+export interface CaseAction {
+  id: number; phase: "initial" | "final"; action: string; type: string; route: "auto" | "site" | "L1" | "L2";
+  rule: string; reason: string; status: string; at: string | null; deadline: string | null; decided_by: string | null;
+}
+export interface CaseRow {
+  id: number; site_id: string; site_name: string; state: string; triggers: string[]; signals: string[];
+  hypotheses: [string, number][]; what_changed: string | null; stop_reason: string | null;
+  opened_at: string; updated_at: string; actions: CaseAction[];
+}
+
+// Open cases (F12) with their actions, the ones waiting on an officer first.
+export async function getOpenCases(): Promise<CaseRow[]> {
+  const rows = await q<CaseRow>(
+    `select c.id, c.site_id, s.name as site_name, c.state, c.triggers, c.signals, c.hypotheses, c.what_changed,
+            c.stop_reason, c.opened_at, c.updated_at,
+            coalesce((select json_agg(a order by a.phase desc, a.id) from case_actions a where a.case_id = c.id), '[]') as actions
+       from cases c join sites s on s.id = c.site_id
+      where c.closed_at is null and s.ward_id=$1
+      order by (select count(*) from case_actions a where a.case_id = c.id and a.status='proposed') desc, c.site_id`,
+    [WARD],
+  );
+  return rows.map((r) => ({ ...r, opened_at: iso(r.opened_at), updated_at: iso(r.updated_at) }));
+}

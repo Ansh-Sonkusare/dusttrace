@@ -86,6 +86,7 @@ def test_overpass_reads_relations_and_kindergartens():
 def test_overpass_merges_a_school_mapped_twice():
     els = [_osm("way", 20, "Shivaji School", "school", lat=19.1100, lon=72.8600),
            _osm("node", 21, "Shivaji School", "school", lat=19.1103, lon=72.8602),
+           _osm("node", 23, "shivaji school", "school", lat=19.1101, lon=72.8601),
            _osm("node", 22, "Shivaji School", "school", lat=19.1300, lon=72.8800)]  # same name, 2.8 km away
     assert [r["id"] for r in overpass.parse({"elements": els})] == ["osm-way-20", "osm-node-22"]
 
