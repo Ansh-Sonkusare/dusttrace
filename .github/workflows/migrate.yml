@@ -1,0 +1,41 @@
+name: Migrate
+
+# Applies new SQL migrations to Supabase as soon as they reach main, so the database is ready when
+# Vercel deploys the console that reads the new tables. Migrations are safe to re-run.
+
+on:
+  push:
+    branches: [main]
+    paths: ["supabase/migrations/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: forecast  # never alongside the hourly job
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    defaults:
+      run:
+        working-directory: services/engine
+    steps:
+      - name: Check secrets
+        id: gate
+        working-directory: .
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "DATABASE_URL secret not set, skipping."; echo "ok=false" >> "$GITHUB_OUTPUT"; else echo "ok=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.ok == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.gate.outputs.ok == 'true'
+        run: pip install -e .
+      - if: steps.gate.outputs.ok == 'true'
+        run: python -m dusttrace init-db
