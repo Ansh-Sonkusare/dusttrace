@@ -434,3 +434,13 @@ def test_compare_cams_stores_both_variants_on_one_window(conn, settings):
     assert set(out["metrics"]) == {"without", "with_cams"} and out["origins"] >= 3
     kind, m = one(conn, "select kind, metrics from backtests where id=%s", (out["id"],))
     assert kind == "cams_feature" and m["with_cams"]["1-24"]["n"] == m["without"]["1-24"]["n"]
+
+
+def test_runs_use_the_cams_features_when_cams_is_stored(conn, settings, monkeypatch):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    _real_with_cams(conn, stale_hours=2)  # a fresh real station with CAMS around it
+    out = pipeline.run(conn, settings)
+    assert one(conn, "select model from runs where id=%s", (out["run_id"],))[0].endswith("+cams")
+    monkeypatch.setenv("DUSTTRACE_CAMS_FEATURES", "0")
+    out = pipeline.run(conn, settings)
+    assert not one(conn, "select model from runs where id=%s", (out["run_id"],))[0].endswith("+cams")
