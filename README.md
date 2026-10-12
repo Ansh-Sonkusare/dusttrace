@@ -1,5 +1,7 @@
 # DustTrace
 
+Live console: https://dusttrace-mumbai.vercel.app (password from the team). Public site pages: `/s/A` … `/s/F`.
+
 Forecast, prevent and prove construction dust in Mumbai wards. Built by Team ARA IGNITE (Ansh, Dhruv, Anuj, Sarang) for Techfest IIT Bombay InnovateX 2026–27, Theme 2: Rising AQI.
 
 DustTrace forecasts PM10 48 hours ahead, models where each construction site's dust plume will drift, and gives every site **Safe-Work Windows**: the hours when dusty work would reach a school, hospital or many residents, and the hours when it is safe to go ahead.
