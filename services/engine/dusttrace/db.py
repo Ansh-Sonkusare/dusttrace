@@ -287,5 +287,16 @@ def write_dust_scores(conn, run_id: int, scores: dict) -> None:
 
 
 def windows_followed(conn, ward_id: str) -> dict:
-    """Share of issued Avoid plans each site accepted. Empty until plan acceptance exists (#9)."""
-    return {}
+    """Per site, over the last 7 days: days the manager accepted the plan / days the site had Avoid
+    windows (IST dates of the runs). Sites with nothing to avoid are left out (unknown)."""
+    rows = conn.execute("""
+        with avoid_days as (
+          select distinct w.site_id, (r.created_at at time zone 'Asia/Kolkata')::date as d
+            from safe_windows w join runs r on r.id = w.run_id join sites s on s.id = w.site_id
+           where s.ward_id=%s and w.status='avoid' and r.created_at > now() - interval '7 days'),
+        accepted as (
+          select distinct site_id, (accepted_at at time zone 'Asia/Kolkata')::date as d
+            from plan_acceptances where accepted_at > now() - interval '7 days')
+        select a.site_id, count(*), count(x.d) from avoid_days a
+          left join accepted x on x.site_id = a.site_id and x.d = a.d group by a.site_id""", (ward_id,)).fetchall()
+    return {r[0]: round(r[2] / r[1], 3) for r in rows}

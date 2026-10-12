@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { q } from "./db";
 import { parseOutcome } from "./officer";
+import { planSecret, verifySite } from "./plan";
 
 // An officer approves or declines an action the policy engine proposed (route L1 or L2).
 // Only proposed actions can be decided; everything else the engine set stays as it is.
@@ -36,4 +37,21 @@ export async function logOutcome(form: FormData): Promise<void> {
   );
   revalidatePath("/officer");
   revalidatePath("/cases");
+}
+
+// A site manager accepts today's plan from their signed link. The token is checked again here.
+export async function acceptPlan(form: FormData): Promise<void> {
+  const siteId = String(form.get("site_id") ?? "");
+  const token = String(form.get("t") ?? "");
+  const secret = planSecret();
+  if (!secret || !verifySite(siteId, token, secret)) return;
+  await q(
+    `insert into plan_acceptances (site_id, run_id, avoid_hours, accepted_by)
+     select $1, r.id, (select count(*) from safe_windows w where w.run_id = r.id and w.site_id = $1 and w.status = 'avoid'
+                                and w.ts <= r.issued_at + interval '24 hours'),
+            'site manager'
+       from latest_run r join sites s on s.ward_id = r.ward_id and s.id = $1`,
+    [siteId],
+  );
+  revalidatePath(`/plan/${siteId}`);
 }

@@ -4,6 +4,7 @@ import TopBar from "@/components/TopBar";
 import WindowStrip from "@/components/WindowStrip";
 import NoRun from "@/components/Empty";
 import TrustPill from "@/components/TrustPill";
+import { planSecret, signSite } from "@/lib/plan";
 import { getAudits, getDustScores, getLatestRun, getSite, getSiteExposures, getWard, getWindows } from "@/lib/queries";
 import { spans } from "@/lib/mapHours";
 import { ACTIVITY_LABEL, dayHour, FAULT_LABEL, hhmm, istHour, SCORE_BAND, STATUS_LABEL, TRUST_TONE } from "@/lib/format";
@@ -74,7 +75,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 <div className="ph"><h2>Dust Score</h2><span className="meta"><span className={`pill ${SCORE_BAND[dust.band].tone}`}><span className="tab">{Math.round(dust.score)}</span> {SCORE_BAND[dust.band].label}</span></span></div>
                 <div className="pb">
                   <p className="small muted" style={{ marginTop: 0 }}>{SCORE_BAND[dust.band].meaning} Shown to residents on the site board through a QR code.</p>
-                  <p className="small" style={{ marginBottom: 0 }}><a href={`/s/${site.id}`}>Public page</a> · <a href={`/api/qr/${site.id}`} download={`dusttrace-site-${site.id}.svg`}>QR code for the board</a></p>
+                  <p className="small" style={{ marginBottom: 0 }}><a href={`/s/${site.id}`}>Public page</a> · <a href={`/api/qr/${site.id}`} download={`dusttrace-site-${site.id}.svg`}>QR code for the board</a>{planSecret() ? <> · <a href={`/plan/${site.id}?t=${signSite(site.id, planSecret()!)}`}>Site manager&apos;s plan link</a></> : null}</p>
                 </div>
               </section>
             )}

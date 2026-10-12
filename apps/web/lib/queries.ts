@@ -235,3 +235,9 @@ export async function countReports(ipHash: string, siteId: string): Promise<{ la
   );
   return { lastHour: r[0]?.last_hour ?? 0, sameSiteToday: r[0]?.same_site ?? 0 };
 }
+
+export async function getLastAcceptance(siteId: string): Promise<{ accepted_at: string; run_id: number | null } | null> {
+  const r = await q<{ accepted_at: string; run_id: number | null }>(
+    "select accepted_at, run_id from plan_acceptances where site_id=$1 order by accepted_at desc limit 1", [siteId]);
+  return r[0] ? { ...r[0], accepted_at: iso(r[0].accepted_at) } : null;
+}

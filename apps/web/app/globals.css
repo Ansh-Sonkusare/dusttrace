@@ -176,3 +176,4 @@ h1 { font: 600 30px/1.1 var(--f-ui); letter-spacing: -0.025em; margin: 0; }
 .parts .track span { display: block; height: 100%; background: #C9C9CE; }
 .hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
 .public footer { text-align: center; padding-top: 8px; }
+.btn.big { min-height: 48px; width: 100%; font-size: 15px; }
