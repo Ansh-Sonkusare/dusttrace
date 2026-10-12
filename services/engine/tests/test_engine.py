@@ -249,3 +249,27 @@ def test_overpass_construction_sites():
     assert by["osm-way-102"]["activity"] == "structure" and by["osm-way-102"]["name"].startswith("Construction site")
     assert 2000 < by["osm-way-101"]["area_m2"] < 40000
     assert all(s["source"] == "osm" and s["demo"] is False for s in sites)
+
+
+def test_ohsome_construction_sites_match_the_overpass_ids():
+    from dusttrace.sources import ohsome
+    sites = ohsome.parse_sites(load("ohsome_construction.json"))
+    by = {s["id"]: s for s in sites}
+    # a 555 m² outline and a point are dropped; ids match Overpass so a source switch can't duplicate sites
+    assert set(by) == {"osm-way-554967617", "osm-way-1531594092", "osm-way-1122603587", "osm-way-1458027984"}
+    assert by["osm-way-554967617"]["name"] == "Metro Casting Yard" and by["osm-way-554967617"]["activity"] == "excavation"
+    assert by["osm-way-1122603587"]["name"] == "Construction site (OSM way 1122603587)"
+    assert 20_000 < by["osm-way-1122603587"]["area_m2"] < 45_000
+    assert all(19.09 < s["lat"] < 19.14 and 72.83 < s["lon"] < 72.91 and s["source"] == "osm" for s in sites)
+
+
+def test_osm_sites_fall_back_to_ohsome_when_overpass_is_down(monkeypatch):
+    from dusttrace import pipeline
+    from dusttrace.sources import ohsome
+
+    def down(*a, **k):
+        raise httpx.ConnectError("all mirrors down")
+    monkeypatch.setattr(overpass, "fetch_sites", down)
+    monkeypatch.setattr(ohsome, "fetch_sites", lambda bbox, **k: ohsome.parse_sites(load("ohsome_construction.json")))
+    sites, source = pipeline.fetch_osm_sites([72.835, 19.09, 72.91, 19.14])
+    assert source == "ohsome" and len(sites) == 4
