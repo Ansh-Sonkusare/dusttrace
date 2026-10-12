@@ -143,6 +143,11 @@ h1 { font: 600 30px/1.1 var(--f-ui); letter-spacing: -0.025em; margin: 0; }
 .meter .seg.unsensored, .key.unsensored { background: #6F6F75; }
 .meter .seg.reports, .key.reports { background: #A3A3A8; }
 .meter .seg.violations, .key.violations { background: #4A4A50; }
+/* Data check: where the run's station hours came from */
+.meter.split { height: 10px; border-radius: 5px; }
+.meter .seg.real, .key.real { background: #C9C9CE; }
+.meter .seg.filled, .key.filled { background: var(--dust-mark); }
+.meter .seg.synthetic, .key.synthetic { background: #4A4A50; }
 .key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; }
 
 /* Cases */

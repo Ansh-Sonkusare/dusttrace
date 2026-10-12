@@ -10,6 +10,7 @@ const ITEMS = [
   { href: "/officer", label: "Today's visits", icon: <><path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z" /><circle cx="12" cy="11" r="2" /></> },
   { href: "/cases", label: "Cases", icon: <><rect x="4" y="4" width="16" height="17" rx="2" /><path d="M9 4V2h6v2" /><path d="M8 11h8M8 15h5" /></> },
   { href: "/sites", label: "Sites", icon: <><path d="M4 21V9l6-4v16" /><path d="M10 21V11h10v10" /><path d="M3 21h18" /></> },
+  { href: "/data", label: "Data check", icon: <><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" /></> },
 ];
 
 export default function Nav() {

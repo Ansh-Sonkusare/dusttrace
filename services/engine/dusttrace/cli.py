@@ -9,6 +9,7 @@
   backtest  replay the last N days with only past data visible (--days N)
   discover  Sentinel-2 change detection: possible unregistered sites (needs network)
   replay-outage  verify the CAMS fill: hide 4 days before each forecast and score it (--days N)
+  verify    data check: how much of the latest run is real; stores data_checks
   all       init-db, seed, ingest, run
 """
 
@@ -36,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     ing.add_argument("--days", type=int, default=420)
     sub.add_parser("run")
     sub.add_parser("discover")
+    sub.add_parser("verify")
     ro = sub.add_parser("replay-outage")
     ro.add_argument("--days", type=int, default=30)
     bt = sub.add_parser("backtest")
@@ -60,6 +62,14 @@ def main(argv: list[str] | None = None) -> int:
             print("ingest:", json.dumps(pipeline.ingest(conn, settings, args.mode, args.days)))
         if args.cmd == "replay-outage":
             print("replay:", json.dumps(pipeline.replay_outage(conn, settings, args.days), indent=2, default=str))
+        if args.cmd == "verify":
+            chk = pipeline.verify(conn, settings)
+            sh = chk["shares"]
+            print(f"run {chk['run_id']} ({chk['data_mode']}): last week's station hours "
+                  f"{sh['real']:.0%} measured, {sh['filled']:.0%} filled, {sh['synthetic']:.0%} synthetic; "
+                  f"weather {chk['weather_live']:.0%} live")
+            for p in chk["problems"] or ["Everything in this run is real, live data."]:
+                print(" -", p)
         if args.cmd == "discover":
             print("discover:", json.dumps(pipeline.discover_sites(conn, settings), indent=2, default=str))
         if args.cmd == "backtest":

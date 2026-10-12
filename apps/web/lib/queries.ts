@@ -20,6 +20,7 @@ export interface Run {
     audit?: { n: number; precision: number; recall: number; detected?: Record<string, number> };
     newest_real_reading?: string | null;
     filled?: { stations: number; hours: number; corrections?: Record<string, { slope: number; intercept: number; mae: number; hours: number }> };
+    inputs?: { hours: number; real: number; filled: number; synthetic: number };
   };
 }
 
@@ -302,4 +303,27 @@ export async function getCandidates(limit = 8): Promise<{ unmatched: Candidate[]
     matched: [...new Set(rows.filter((r) => r.site_id).map((r) => r.site_id as string))].sort(),
     total: rows.length,
   };
+}
+
+export interface DataCheck {
+  id: number; run_id: number; checked_at: string; ok: boolean;
+  shares: { hours: number; real: number; filled: number; synthetic: number };
+  stations: { station_id: string; name?: string; newest: string | null; age_h: number | null; status: "fresh" | "stale" | "silent" }[];
+  cams: Record<string, { hours: number; mae: number; bias: number; r: number | null; from?: string; to?: string }>;
+  sources: { weather_live: number; receptors_osm: number; sites_real: number; satellite_scene: string | null;
+             satellite_found_at: string | null; run_issued_at: string; data_mode: string };
+  problems: string[];
+}
+
+// The latest data check (issue #29), with station names joined in.
+export async function getLatestDataCheck(): Promise<DataCheck | null> {
+  const r = await q<DataCheck>(
+    `select id, run_id, checked_at, ok, shares, stations, cams, sources, problems
+       from data_checks where ward_id=$1 order by id desc limit 1`, [WARD]);
+  if (!r[0]) return null;
+  const names = Object.fromEntries((await q<{ id: string; name: string }>(
+    "select id, name from stations where ward_id=$1", [WARD])).map((s) => [s.id, s.name]));
+  const c = r[0];
+  return { ...c, run_id: Number(c.run_id), checked_at: iso(c.checked_at),
+           stations: c.stations.map((s) => ({ ...s, name: names[s.station_id] ?? s.station_id })) };
 }
