@@ -16,7 +16,7 @@ jobs:
       max-parallel: 1
       matrix:
         ward: [K-East, P-North]
-    timeout-minutes: 10
+    timeout-minutes: 30  # per ward: Overpass retries, ~4 min of housing cells, sites
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       DUSTTRACE_WARD: ${{ matrix.ward }}
