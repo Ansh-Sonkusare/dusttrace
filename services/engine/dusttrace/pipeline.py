@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pandas as pd
 
-from . import attribution, audit, db, forecast, windows
+from . import agent, attribution, audit, db, forecast, windows
 from .config import Settings, load_seed
 from .sources import openaq, openmeteo, overpass, synthetic
 
@@ -140,7 +140,7 @@ def run(conn, settings: Settings) -> dict:
     fc = forecast.predict(model, rd[["station_id", "ts", "pm10"]], wx, t0, settings.horizon_hours)
 
     data_mode = _mode(wx["synthetic"].any(), wx["synthetic"].all(), rd["synthetic"].any(), rd["synthetic"].all())
-    audits, bench = audit_sensors(conn, ward_id, rd, wx, t0)
+    audits, bench, hot = audit_sensors(conn, ward_id, rd, wx, t0)
     metrics = {**model.metrics, "stations": list(active), "audit": bench}
     run_id = db.create_run(conn, ward_id, t0.to_pydatetime(), data_mode, "lightgbm-direct-v1", metrics)
     db.write_forecasts(conn, run_id, fc)
@@ -158,6 +158,7 @@ def run(conn, settings: Settings) -> dict:
     db.write_site_hours(conn, run_id, hours)
     ranked = rank_sites(conn, ward_id, sites, list(active), future, ward_fc, audits)
     db.write_ranking(conn, run_id, ranked)
+    respond(conn, ward_id, run_id, now_hour(), hours, recs, ward_fc, audits, hot)
     conn.commit()
 
     counts = pd.Series([h.status for h in hours]).value_counts().to_dict()
@@ -194,7 +195,61 @@ def audit_sensors(conn, ward_id: str, rd: pd.DataFrame, wx: pd.DataFrame, t0: pd
     sim = audit.simulate(specs, ambient, wx, t0)
     db.write_site_readings(conn, sim)
     results = [audit.score(s, sim, ambient, wx, t0) for s in specs]
-    return results, audit.benchmark(ambient, wx, t0)
+    by_site = {s.sensor_id: s.site_id for s in specs}
+    hot = {by_site[k]: v for k, v in audit.hot_hours(sim, ambient, t0).items()}
+    return results, audit.benchmark(ambient, wx, t0), hot
+
+
+def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.DataFrame,
+            ward_p: pd.Series, audits, hot: dict) -> dict:
+    """Dust Response Agent (F12): build each site's context from this run, let the policy engine
+    decide, and update the site's open case. Returns {site_id: state}."""
+    names = recs.set_index("id")["name"].to_dict()
+    kinds = recs.set_index("id")["kind"].to_dict()
+    sites = db.read_frame(conn, """select s.id, s.name, s.activity, n.id is not null as has_sensor,
+                                          coalesce(n.has_relay, false) as has_relay
+                                     from sites s left join site_sensors n on n.site_id = s.id
+                                    where s.ward_id=%s order by s.id""", (ward_id,))
+    trust = {a.site_id: a.score for a in audits}
+    signals = db.site_signals(conn, ward_id)
+    states = {}
+    for s in sites.itertuples():
+        # Only hours when dusty work is allowed (06:00-22:00 IST) can need a site to act.
+        mine = [h for h in hours if h.site_id == s.id and 6 <= plume_hour(h.ts) < 22]
+        spikes = [h for h in mine if float(ward_p.get(h.ts, 0.0)) >= 0.6 and h.exposures]
+        ctx = agent.SiteContext(
+            site_id=s.id, name=s.name, activity=s.activity, has_sensor=bool(s.has_sensor),
+            has_relay=bool(s.has_relay), trust=trust.get(s.id), now=now,
+            spike_hours=[h.ts for h in spikes],
+            spike_receptors=_unique(names[r] for h in spikes for r, _ in h.exposures),
+            sensitive_avoid=_unique_pairs((h.ts, names[r]) for h in mine if h.status == "avoid" and h.sensitive_hit
+                                          for r, c in h.exposures if kinds.get(r) in ("school", "hospital")),
+            sensor_hot_hours=hot.get(s.id, 0),
+            pending_requests=db.pending_requests(conn, s.id),
+            **signals.get(s.id, {}),
+        )
+        decision = agent.decide(ctx)
+        states[s.id] = db.write_case(conn, run_id, s.id, decision)
+    return states
+
+
+def plume_hour(ts) -> float:
+    return (ts.hour + ts.minute / 60 + 5.5) % 24
+
+
+def _unique(names) -> list[str]:
+    """Sorted names with case-insensitive duplicates removed (OSM often maps a place twice)."""
+    seen = {}
+    for n in names:
+        seen.setdefault(n.casefold(), n)
+    return sorted(seen.values())
+
+
+def _unique_pairs(pairs) -> list:
+    seen = {}
+    for ts, n in pairs:
+        seen.setdefault((ts, n.casefold()), (ts, n))
+    return sorted(seen.values())
 
 
 def anchor(rd: pd.DataFrame, now: pd.Timestamp) -> tuple[pd.Timestamp, pd.Index]:

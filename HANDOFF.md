@@ -64,6 +64,7 @@ Overpass (schools, hosp.) ─┘                                (LightGBM + Gaus
   - Seven checks over 7 days (dropout, flatline, neighbour, working-hours signature, placement, humidity, drift) give a 0–100 score: trusted 70+, check 40–69, untrusted < 40 (D5).
   - Each run also scores a 50-sensor benchmark; its precision/recall are in `runs.metrics.audit`.
 - `attribution.py` (F4): back-trajectories from each station through the next 24 forecast hours (weighted by P(PM10 > 100) ≥ 0.4) give each site an upwind score. Priority = 0.35·upwind + 0.25·(1 − trust) + 0.15·reports + 0.15·unsensored + 0.10·violations, in points out of 100, with the top two reasons. Stored in `inspection_rank`; shown on `/inspect`.
+- `agent.py` (F12): the Dust Response Agent's policy engine. Each run builds a `SiteContext` per site and `decide` returns triggers, cause hypotheses, initial/final actions from the PRD catalog (each cites D1–D10 and a route: auto, site, L1, L2) and `what_changed`. Guards: D1 (no enforcement on one signal), D7 (unanswered requests escalate; nothing assumed), D9 (stop-work only proposed to L2). One open case per site in `cases`/`case_actions`; officer decisions and deadlines persist across runs. Console `/cases` approves or declines proposed actions. Alerts are logged, not sent.
 - `windows.py`:
   - **Avoid** if a school or hospital gets ≥ 40 µg/m³ added, or any receptor gets ≥ 40 while P(PM10 > 100) ≥ 0.6.
   - **Caution** if any receptor gets ≥ 15, or P ≥ 0.6.

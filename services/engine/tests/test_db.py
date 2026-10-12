@@ -112,3 +112,38 @@ def test_run_ranks_every_site_for_inspection(conn, settings):
     by_site = {r[0]: r for r in rows}
     assert by_site["D"][3]["unsensored"] > 0 and by_site["A"][3]["unsensored"] == 0
     assert by_site["C"][3]["trust"] > by_site["A"][3]["trust"]  # C's monitor is untrusted
+
+
+def _case_actions(conn, site):
+    return {(r[0], r[1]): r[2] for r in conn.execute(
+        """select a.action, a.rule, a.status from case_actions a join cases c on c.id = a.case_id
+            where c.site_id=%s and c.closed_at is null and a.phase='final'""", (site,)).fetchall()}
+
+
+def test_run_opens_one_case_per_site_and_keeps_officer_decisions(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    pipeline.run(conn, settings)
+    c = _case_actions(conn, "C")  # untrusted monitor: D5
+    assert c[("FLAG_SENSOR_FOR_AUDIT", "D5")] == "done" and c[("ADD_TO_INSPECTION", "D5")] == "proposed"
+    d = _case_actions(conn, "D")  # no monitor, one signal: D1 spot check, no enforcement
+    assert d[("REQUEST_SPOT_CHECK", "D1")] == "requested" and ("ADD_TO_INSPECTION", "D6") not in d
+
+    conn.execute("""update case_actions set status='approved', decided_by='test', decided_at=now()
+                     where action='ADD_TO_INSPECTION' and case_id=(select id from cases where site_id='C')""")
+    conn.commit()
+    pipeline.run(conn, settings)
+    assert one(conn, "select count(*) from cases where closed_at is null and site_id='C'")[0] == 1
+    assert _case_actions(conn, "C")[("ADD_TO_INSPECTION", "D5")] == "approved"
+
+
+def test_unanswered_request_escalates_under_d7(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    pipeline.run(conn, settings)
+    conn.execute("""update case_actions set deadline = now() - interval '1 hour'
+                     where action='REQUEST_SPOT_CHECK' and case_id=(select id from cases where site_id='D')""")
+    conn.commit()
+    pipeline.run(conn, settings)
+    d = _case_actions(conn, "D")
+    assert d[("REQUEST_SPOT_CHECK", "D1")] == "expired" and d[("ADD_TO_INSPECTION", "D7")] == "proposed"
+    note = one(conn, "select what_changed from cases where site_id='D' and closed_at is null")[0]
+    assert "none was assumed" in note

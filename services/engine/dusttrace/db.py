@@ -227,3 +227,44 @@ def write_ranking(conn, run_id: int, ranked) -> None:
                values (%s,%s,%s,%s,%s,%s)""",
             [(run_id, r.site_id, r.rank, r.score, json.dumps(r.components), r.reasons) for r in ranked],
         )
+
+
+def pending_requests(conn, site_id: str) -> list[dict]:
+    rows = conn.execute("""select a.action, a.deadline from case_actions a join cases c on c.id = a.case_id
+                            where c.site_id=%s and c.closed_at is null and a.phase='final'
+                              and a.status='requested' and a.deadline is not null""", (site_id,)).fetchall()
+    return [{"action": r[0], "deadline": r[1]} for r in rows]
+
+
+def write_case(conn, run_id: int, site_id: str, d) -> str:
+    """Update the site's open case with this run's decision, or open one; close it when nothing triggers.
+    Existing actions keep their status and deadline, so officer decisions and D7 clocks survive runs."""
+    row = conn.execute("select id from cases where site_id=%s and closed_at is null", (site_id,)).fetchone()
+    if d is None:
+        if row:
+            conn.execute("""update cases set state='DONE', closed_at=now(), updated_at=now(), last_run_id=%s,
+                            stop_reason='Nothing triggers in the latest run.' where id=%s""", (run_id, row[0]))
+        return "DONE" if row else "NONE"
+    vals = (d.state, d.triggers, d.signals, json.dumps(d.hypotheses), d.what_changed, d.stop_reason, run_id)
+    if row:
+        case_id = row[0]
+        conn.execute("""update cases set state=%s, triggers=%s, signals=%s, hypotheses=%s, what_changed=%s,
+                        stop_reason=%s, last_run_id=%s, updated_at=now() where id=%s""", (*vals, case_id))
+    else:
+        case_id = conn.execute("""insert into cases (state, triggers, signals, hypotheses, what_changed, stop_reason,
+                                  last_run_id, opened_run_id, site_id) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                  returning id""", (*vals, run_id, site_id)).fetchone()[0]
+    with conn.cursor() as cur:
+        for phase, acts in (("initial", d.initial), ("final", d.final)):
+            cur.executemany(
+                """insert into case_actions (case_id, phase, action, type, route, rule, reason, status, at, deadline)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   on conflict (case_id, phase, action, rule) do update set reason=excluded.reason, at=excluded.at""",
+                [(case_id, phase, a.action, a.type, a.route, a.rule, a.reason, a.status,
+                  a.at.to_pydatetime() if a.at is not None else None,
+                  a.deadline.to_pydatetime() if a.deadline is not None else None) for a in acts],
+            )
+    if d.expired:
+        conn.execute("""update case_actions set status='expired' where case_id=%s and status='requested'
+                        and action = any(%s)""", (case_id, d.expired))
+    return d.state

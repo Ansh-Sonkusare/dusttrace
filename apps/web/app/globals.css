@@ -144,3 +144,8 @@ h1 { font: 600 30px/1.1 var(--f-ui); letter-spacing: -0.025em; margin: 0; }
 .meter .seg.reports, .key.reports { background: #A3A3A8; }
 .meter .seg.violations, .key.violations { background: #4A4A50; }
 .key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; }
+
+/* Cases */
+.grid-case { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+@media (max-width: 1100px) { .grid-case { grid-template-columns: minmax(0, 1fr); } }
+.decide { display: flex; gap: 8px; margin-top: 8px; }
