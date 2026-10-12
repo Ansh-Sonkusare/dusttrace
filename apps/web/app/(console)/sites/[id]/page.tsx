@@ -4,9 +4,9 @@ import TopBar from "@/components/TopBar";
 import WindowStrip from "@/components/WindowStrip";
 import NoRun from "@/components/Empty";
 import TrustPill from "@/components/TrustPill";
-import { getAudits, getLatestRun, getSite, getSiteExposures, getWard, getWindows } from "@/lib/queries";
+import { getAudits, getDustScores, getLatestRun, getSite, getSiteExposures, getWard, getWindows } from "@/lib/queries";
 import { spans } from "@/lib/mapHours";
-import { ACTIVITY_LABEL, dayHour, FAULT_LABEL, hhmm, istHour, STATUS_LABEL, TRUST_TONE } from "@/lib/format";
+import { ACTIVITY_LABEL, dayHour, FAULT_LABEL, hhmm, istHour, SCORE_BAND, STATUS_LABEL, TRUST_TONE } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +17,9 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const [ward, run, site] = await Promise.all([getWard(), getLatestRun(), getSite(id)]);
   if (!site) notFound();
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
-  const [rows, exposures, audits] = await Promise.all([getWindows(run.id, id), getSiteExposures(run.id, id), getAudits(run.id, id)]);
+  const [rows, exposures, audits, scores] = await Promise.all([getWindows(run.id, id), getSiteExposures(run.id, id), getAudits(run.id, id), getDustScores(run.id, id)]);
   const audit = audits[0];
+  const dust = scores[0];
   const day = rows.filter((r) => { const h = istHour(r.ts); return h >= 8 && h < 20; });
   const goSpans = spans(day.filter((r) => r.status === "go")).sort((a, b) => b.rows.length - a.rows.length).slice(0, 3)
     .sort((a, b) => a.from.localeCompare(b.from));
@@ -68,6 +69,15 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 )}
               </div>
             </section>
+            {dust && (
+              <section className="panel">
+                <div className="ph"><h2>Dust Score</h2><span className="meta"><span className={`pill ${SCORE_BAND[dust.band].tone}`}><span className="tab">{Math.round(dust.score)}</span> {SCORE_BAND[dust.band].label}</span></span></div>
+                <div className="pb">
+                  <p className="small muted" style={{ marginTop: 0 }}>{SCORE_BAND[dust.band].meaning} Shown to residents on the site board through a QR code.</p>
+                  <p className="small" style={{ marginBottom: 0 }}><a href={`/s/${site.id}`}>Public page</a> · <a href={`/api/qr/${site.id}`} download={`dusttrace-site-${site.id}.svg`}>QR code for the board</a></p>
+                </div>
+              </section>
+            )}
             <section className="panel">
               <div className="ph"><h2>Site sensor</h2><span className="meta"><TrustPill audit={audit} /></span></div>
               <div className="pb">

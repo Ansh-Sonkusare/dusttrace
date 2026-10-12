@@ -212,3 +212,26 @@ export async function getOfficerActions(): Promise<{ site_id: string; action: st
       order by c.site_id, a.id`,
   );
 }
+
+export interface DustScore {
+  site_id: string; score: number; band: "good" | "fair" | "poor"; notes: string[];
+  components: { trust: number; spikes: number; windows: number; reports: number; inspections: number };
+}
+
+export async function getDustScores(runId: number, siteId?: string): Promise<DustScore[]> {
+  return q<DustScore>(
+    `select site_id, score, band, components, notes from dust_scores where run_id=$1 and ($2::text is null or site_id=$2)
+      order by site_id`,
+    [runId, siteId ?? null],
+  );
+}
+
+export async function countReports(ipHash: string, siteId: string): Promise<{ lastHour: number; sameSiteToday: number }> {
+  const r = await q<{ last_hour: number; same_site: number }>(
+    `select count(*) filter (where at > now() - interval '1 hour')::int as last_hour,
+            count(*) filter (where site_id=$2 and at > now() - interval '1 day')::int as same_site
+       from citizen_reports where ip_hash=$1 and at > now() - interval '1 day'`,
+    [ipHash, siteId],
+  );
+  return { lastHour: r[0]?.last_hour ?? 0, sameSiteToday: r[0]?.same_site ?? 0 };
+}

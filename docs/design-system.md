@@ -68,6 +68,7 @@ Writing rules: sentence case everywhere. No all-caps eyebrows, no labels stacked
 | `.banner` | Amber outline on dust tint, for honesty notices (synthetic data) |
 | `.pill` | Status or mode chip; tinted fill + coloured border |
 | `.meter` | Priority score as segments, one per component; upwind is the one amber segment, the rest are greys, with a key below |
+| Public site page (`/s/[id]`) | No console rail; one 640 px column, phone first. Big light score numeral, band pill (Good go, Fair caution, Poor avoid), grey part bars, demo banner, 44 px report choices |
 | `TrustPill` | Sensor trust score and band: Trusted (go), Check (caution), Untrusted (avoid); "No sensor" plain |
 
 ## Charts

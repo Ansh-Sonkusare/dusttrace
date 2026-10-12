@@ -80,3 +80,17 @@ export const STATUS_WORD: Record<string, string> = {
 export function caseId(id: number): string {
   return `DT-KE-${String(id).padStart(4, "0")}`;
 }
+
+export const SCORE_BAND = {
+  good: { label: "Good", tone: "go", meaning: "Keeps its dust in check. Fewer routine inspections." },
+  fair: { label: "Fair", tone: "caution", meaning: "Some dust problems. Room to improve." },
+  poor: { label: "Poor", tone: "avoid", meaning: "Repeated dust problems. At the top of the inspection list." },
+} as const;
+
+export const SCORE_PART: Record<string, { label: string; max: number }> = {
+  trust: { label: "Its own dust monitor can be trusted", max: 30 },
+  spikes: { label: "Few dust spikes traced to it", max: 25 },
+  windows: { label: "Follows its Safe-Work Windows", max: 20 },
+  reports: { label: "Few verified complaints from residents", max: 15 },
+  inspections: { label: "Clean inspection record", max: 10 },
+};

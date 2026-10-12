@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pandas as pd
 
-from . import agent, attribution, audit, db, forecast, windows
+from . import agent, attribution, audit, db, dust_score, forecast, windows
 from .config import Settings, load_seed
 from .sources import openaq, openmeteo, overpass, synthetic
 
@@ -158,6 +158,7 @@ def run(conn, settings: Settings) -> dict:
     db.write_site_hours(conn, run_id, hours)
     ranked = rank_sites(conn, ward_id, sites, list(active), future, ward_fc, audits)
     db.write_ranking(conn, run_id, ranked)
+    db.write_dust_scores(conn, run_id, score_sites(conn, ward_id, ranked, audits))
     respond(conn, ward_id, run_id, now_hour(), hours, recs, ward_fc, audits, hot)
     conn.commit()
 
@@ -182,6 +183,22 @@ def rank_sites(conn, ward_id: str, sites: pd.DataFrame, station_ids: list[str], 
              "reports": signals.get(s["id"], {}).get("reports", 0),
              "violations": signals.get(s["id"], {}).get("violations", 0)} for s in site_list]
     return attribution.rank(rows)
+
+
+def score_sites(conn, ward_id: str, ranked, audits) -> dict:
+    """Dust Score (F8) per site. Windows followed stays unknown until plans can be accepted (#9)."""
+    trust = {a.site_id: a.score for a in audits}
+    signals = db.site_signals(conn, ward_id)
+    followed = db.windows_followed(conn, ward_id)
+    out = {}
+    for r in ranked:
+        sig = signals.get(r.site_id, {})
+        hours = int(r.upwind_hours or 0)
+        out[r.site_id] = dust_score.compute(
+            trust=trust.get(r.site_id), has_sensor=r.site_id in trust, spike_hours=hours,
+            windows_followed=followed.get(r.site_id), verified_reports=sig.get("verified_reports", 0),
+            violations=sig.get("violations_90d", 0))
+    return out
 
 
 def audit_sensors(conn, ward_id: str, rd: pd.DataFrame, wx: pd.DataFrame, t0: pd.Timestamp):

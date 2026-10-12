@@ -33,6 +33,7 @@ class Ranked:
     score: float
     components: dict = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
+    upwind_hours: int = 0
 
 
 def _xy(lat0: float, lon0: float, lat: float, lon: float) -> tuple[float, float]:
@@ -142,7 +143,7 @@ def rank(rows: list[dict], weights: dict = WEIGHTS) -> list[Ranked]:
         top = [k for k, v in sorted(comp.items(), key=lambda kv: -kv[1]) if v > 0.005][:2]
         reasons = [say[k] for k in top] or ["Nothing points here in this forecast."]
         out.append(Ranked(r["site_id"], r.get("name", r["site_id"]), 0, round(100 * sum(comp.values()), 1),
-                          {k: round(100 * v, 1) for k, v in comp.items()}, reasons))
+                          {k: round(100 * v, 1) for k, v in comp.items()}, reasons, int(r.get("upwind_hours") or 0)))
     out.sort(key=lambda x: (-x.score, x.site_id))
     for i, x in enumerate(out, 1):
         x.rank = i
