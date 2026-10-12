@@ -25,6 +25,7 @@ FEATURES = (
     + ["mean_24", "max_24", "h", "hour_ist", "dow", "month", "station_code"]
     + WX_COLS
 )
+CAMS_FEATURES = ["cams_t", "cams_mean_24"]  # Copernicus CAMS PM10 at the station: target hour, and the 24 h before it
 IST = 5.5
 
 
@@ -46,12 +47,15 @@ def _station_frame(readings: pd.DataFrame, sid: str, idx: pd.DatetimeIndex) -> p
 
 def build_rows(readings: pd.DataFrame, wx: pd.DataFrame, origins: pd.DatetimeIndex | None,
                horizon: int, station_codes: dict[str, int], with_target: bool = True,
-               origin_stride: int = 3) -> pd.DataFrame:
+               origin_stride: int = 3, cams: pd.DataFrame | None = None) -> pd.DataFrame:
     w = _prep_weather(wx)
     idx = pd.date_range(w.index.min(), w.index.max(), freq="h", tz="UTC")
     rows = []
     for sid, code in station_codes.items():
         pm = _station_frame(readings, sid, idx)
+        if cams is not None:
+            cm = _station_frame(cams, sid, idx)
+            cm24 = cm.rolling(24, min_periods=12).mean()
         lagged = {f"lag_{l}": pm.shift(l - 1) for l in LAGS}  # lag_1 == value at t0
         mean24 = pm.rolling(24, min_periods=12).mean()
         max24 = pm.rolling(24, min_periods=12).max()
@@ -74,6 +78,9 @@ def build_rows(readings: pd.DataFrame, wx: pd.DataFrame, origins: pd.DatetimeInd
             df["hour_ist"] = ((hrs + IST) % 24).to_numpy()
             df["dow"] = tgt.dayofweek.to_numpy()
             df["month"] = tgt.month.to_numpy()
+            if cams is not None:
+                df["cams_t"] = cm.reindex(tgt).to_numpy()
+                df["cams_mean_24"] = cm24.reindex(tgt).to_numpy()
             if with_target:
                 df["y"] = pm.reindex(tgt).to_numpy()
             rows.append(df)
@@ -93,6 +100,11 @@ class Model:
     station_codes: dict[str, int]
     threshold: float
     metrics: dict
+    features: list = None  # FEATURES, plus CAMS_FEATURES when trained with CAMS
+
+    def __post_init__(self):
+        if self.features is None:
+            self.features = list(FEATURES)
 
 
 def _reg(alpha: float | None) -> lgb.LGBMRegressor:
@@ -104,16 +116,17 @@ def _reg(alpha: float | None) -> lgb.LGBMRegressor:
 
 
 def train(readings: pd.DataFrame, wx: pd.DataFrame, horizon: int = 48, threshold: float = 100.0,
-          holdout_frac: float = 0.2) -> Model:
+          holdout_frac: float = 0.2, cams: pd.DataFrame | None = None) -> Model:
     codes = {sid: i for i, sid in enumerate(sorted(readings["station_id"].unique()))}
-    data = build_rows(readings, wx, None, horizon, codes)
+    data = build_rows(readings, wx, None, horizon, codes, cams=cams)
+    feats = list(FEATURES) + (CAMS_FEATURES if cams is not None else [])
     if len(data) < 500:
         raise ValueError(f"Not enough history to train ({len(data)} rows)")
     cut = data["t0"].quantile(1 - holdout_frac)
     tr, te = data[data["t0"] <= cut], data[data["t0"] > cut]
 
     def fit_all(df):
-        X, y = df[FEATURES], df["y"]
+        X, y = df[feats], df["y"]
         m = _reg(None).fit(X, y)
         lo = _reg(0.1).fit(X, y)
         hi = _reg(0.9).fit(X, y)
@@ -122,8 +135,8 @@ def train(readings: pd.DataFrame, wx: pd.DataFrame, horizon: int = 48, threshold
         return m, lo, hi, clf
 
     m, lo, hi, clf = fit_all(tr)
-    pred = m.predict(te[FEATURES])
-    p = clf.predict_proba(te[FEATURES])[:, 1]
+    pred = m.predict(te[feats])
+    p = clf.predict_proba(te[feats])[:, 1]
     y_true = te["y"].to_numpy()
     persist = te["lag_1"].to_numpy()
     ex_true = y_true > threshold
@@ -133,23 +146,24 @@ def train(readings: pd.DataFrame, wx: pd.DataFrame, horizon: int = 48, threshold
         "mae_persistence": round(float(mean_absolute_error(y_true, persist)), 2),
         "f1_exceed_model": round(float(f1_score(ex_true, p >= 0.5, zero_division=0)), 3),
         "f1_exceed_persistence": round(float(f1_score(ex_true, persist > threshold, zero_division=0)), 3),
-        "coverage_10_90": round(float(np.mean((y_true >= lo.predict(te[FEATURES])) & (y_true <= hi.predict(te[FEATURES])))), 3),
+        "coverage_10_90": round(float(np.mean((y_true >= lo.predict(te[feats])) & (y_true <= hi.predict(te[feats])))), 3),
         "exceed_rate": round(float(ex_true.mean()), 3),
         "train_rows": int(len(tr)),
     }
     # Refit on everything for the production forecast.
     m, lo, hi, clf = fit_all(data)
-    return Model(m, lo, hi, clf, codes, threshold, metrics)
+    return Model(m, lo, hi, clf, codes, threshold, metrics, feats)
 
 
 def predict(model: Model, readings: pd.DataFrame, wx: pd.DataFrame, t0: pd.Timestamp,
-            horizon: int = 48) -> pd.DataFrame:
+            horizon: int = 48, cams: pd.DataFrame | None = None) -> pd.DataFrame:
     """Station rows plus a 'ward' aggregate (mean of stations; p_exceed from the mean forecast's spread)."""
     origins = pd.DatetimeIndex([t0])
-    rows = build_rows(readings, wx, origins, horizon, model.station_codes, with_target=False)
+    use_cams = cams if set(CAMS_FEATURES) <= set(model.features) else None
+    rows = build_rows(readings, wx, origins, horizon, model.station_codes, with_target=False, cams=use_cams)
     if rows.empty:
         return pd.DataFrame(columns=["station_id", "ts", "pm10", "pm10_lo", "pm10_hi", "p_exceed"])
-    X = rows[FEATURES]
+    X = rows[model.features]
     rows["pm10"] = np.clip(model.median.predict(X), 0, None)
     lo = model.lo.predict(X)
     hi = model.hi.predict(X)

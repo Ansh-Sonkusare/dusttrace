@@ -12,7 +12,7 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 
 from . import agent, alerts, attribution, audit, backtest as bt, db, dust_score, fill, forecast, windows
-from . import housing, signature, verify as verify_mod
+from . import effect, housing, signature, verify as verify_mod
 from .config import Settings, load_seed
 from .sources import cams, ohsome, openaq, openmeteo, overpass, synthetic
 
@@ -257,6 +257,7 @@ def run(conn, settings: Settings) -> dict:
     db.write_dust_scores(conn, run_id, score_sites(conn, ward_id, ranked, audits, known))
     windy = signature.dry_windy_hours(wx, t0, settings.horizon_hours)
     metrics_extra = {"dry_windy_hours": len(windy)}
+    metrics_extra["verified"] = verify_actions(conn, ward_id, now_hour())
     states = respond(conn, ward_id, run_id, now_hour(), hours, recs, ward_fc, audits, hot, sites, sigs, windy)
     conn.execute("update runs set metrics = metrics || %s where id=%s", (Jsonb(metrics_extra), run_id))
     db.write_alerts(conn, run_id, alerts.derive(states))
@@ -429,6 +430,63 @@ def verify(conn, settings: Settings) -> dict:
             **sources}
 
 
+VERIFY_ACTIONS = ("SCHEDULE_MIST", "PRE_WET_SITE", "TRIGGER_MIST_NOW", "PAUSE_DUSTY_TASK", "ORDER_COVER_DEBRIS",
+                  "ORDER_WHEEL_WASH", "ISSUE_SAFE_WORK_WINDOW")
+
+
+def verify_actions(conn, ward_id: str, now: pd.Timestamp) -> dict:
+    """Verify (F12, issue #33): for each dust-cutting action whose window has passed, compare PM10 at the
+    nearest real station downwind of the site with comparable earlier days. A verified drop closes the case."""
+    todo = conn.execute("""select a.id, a.case_id, c.site_id, a.action, coalesce(a.at, a.created_at), s.lat, s.lon
+                             from case_actions a join cases c on c.id = a.case_id join sites s on s.id = c.site_id
+                            where s.ward_id=%s and c.closed_at is null and a.phase='final'
+                              and a.status in ('done', 'sent', 'approved') and a.action = any(%s)
+                              and coalesce(a.at, a.created_at) + make_interval(hours => %s) <= %s
+                              and not exists (select 1 from verifications v where v.action_id = a.id)""",
+                        (ward_id, list(VERIFY_ACTIONS), effect.WINDOW_H, now.to_pydatetime())).fetchall()
+    counts = {"checked": 0, "drop": 0, "no_drop": 0, "insufficient": 0}
+    if not todo:
+        return counts
+    stations = conn.execute("""select id, name, lat, lon from stations where ward_id=%s and source <> 'seed'""",
+                            (ward_id,)).fetchall()
+    for aid, cid, site_id, action, at, lat, lon in todo:
+        start = pd.Timestamp(at).floor("h")
+        end = start + pd.Timedelta(hours=effect.WINDOW_H)
+        wd = db.read_frame(conn, """select ts, wind_dir from weather_hourly where ward_id=%s and ts > %s and ts < %s
+                                     order by ts""", (ward_id, (start - pd.Timedelta(days=effect.LOOKBACK_DAYS + 1)).to_pydatetime(),
+                                                      end.to_pydatetime()))
+        wd["ts"] = pd.to_datetime(wd["ts"], utc=True)
+        wind = wd.set_index("ts")["wind_dir"].astype(float)
+        w_now = wind[(wind.index >= start) & (wind.index < end)]
+        site = (float(lat), float(lon))
+        near = sorted((effect.km(site, (float(s[2]), float(s[3]))), s) for s in stations)
+        pick = next((s for d, s in near if d <= effect.REACH_KM and len(w_now)
+                     and effect.downwind(site, (float(s[2]), float(s[3])), effect._mean_dir(w_now))), None)
+        if pick is None:
+            res = {"verdict": "insufficient", "during": None, "baseline": None, "change_pct": None, "days": 0,
+                   "note": "no real station downwind within 4 km in the window"}
+        else:
+            pm = db.read_frame(conn, """select ts, pm10 from readings where station_id=%s and not synthetic
+                                         and ts > %s and ts < %s""", (pick[0], (start - pd.Timedelta(days=effect.LOOKBACK_DAYS + 1)).to_pydatetime(),
+                                                                     end.to_pydatetime()))
+            pm["ts"] = pd.to_datetime(pm["ts"], utc=True)
+            res = effect.assess(pm.set_index("ts")["pm10"].astype(float), wind, (start, end))
+            res["note"] = f"{pick[1]}: {res['note']}"
+        conn.execute("""insert into verifications (action_id, case_id, site_id, action, station_id, window_start, window_end,
+                        during, baseline, change_pct, days, verdict, note) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                     (aid, cid, site_id, action, pick[0] if pick else None, start.to_pydatetime(), end.to_pydatetime(),
+                      res["during"], res["baseline"], res["change_pct"], res["days"], res["verdict"], res["note"]))
+        if res["verdict"] == "drop":
+            conn.execute("""update cases set state='DONE', closed_at=now(), updated_at=now(), stop_reason=%s
+                            where id=%s and closed_at is null""",
+                         (f"Verified: PM10 at {pick[1]} was {abs(res['change_pct']):.0f}% below comparable days "
+                          f"after {action.replace('_', ' ').lower()}.", cid))
+        counts["checked"] += 1
+        counts[res["verdict"]] += 1
+    conn.commit()
+    return counts
+
+
 def station_signatures(conn, ward_id: str, rd: pd.DataFrame, t0: pd.Timestamp) -> dict:
     """PM10/PM2.5 signature (F10) per real station, with its name and position for matching sites."""
     sigs = signature.station_signatures(rd, t0)
@@ -472,9 +530,8 @@ def fill_from_cams(conn, ward_id: str, rd: pd.DataFrame, now: pd.Timestamp) -> t
     return (pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=rd.columns)), info
 
 
-def backtest(conn, settings: Settings, days: int = 60) -> dict:
-    """Back-test the forecast over the last `days` days of data (F3). Uses only real station readings
-    when there are any, so the report's numbers are real; otherwise synthetic, and labelled so."""
+def _backtest_inputs(conn, settings: Settings):
+    """Weather, and the station readings a back-test uses: real ones when there are any (60+ days each)."""
     wx = db.read_frame(conn, "select ts, wind_speed, wind_dir, blh, temp, rh, precip, synthetic from weather_hourly where ward_id=%s order by ts", (settings.ward_id,))
     rd = db.read_frame(conn, """select r.station_id, r.ts, r.pm10, r.synthetic from readings r
                                 join stations s on s.id = r.station_id where s.ward_id=%s and r.pm10 is not null
@@ -490,6 +547,39 @@ def backtest(conn, settings: Settings, days: int = 60) -> dict:
     # Stations with enough history to learn from (at least 60 days of hours).
     counts = use.groupby("station_id")["pm10"].count()
     use = use[use["station_id"].isin(counts[counts >= 24 * 60].index)]
+    return wx, use, is_real
+
+
+def compare_cams(conn, settings: Settings, days: int = 30) -> dict:
+    """Issue #32: back-test the same window with and without the CAMS features; store both."""
+    wx, use, is_real = _backtest_inputs(conn, settings)
+    cm = db.read_frame(conn, """select c.station_id, c.ts, c.pm10 from cams_hourly c join stations s on s.id = c.station_id
+                                 where s.ward_id=%s and c.pm10 is not null""", (settings.ward_id,))
+    cm["ts"] = pd.to_datetime(cm["ts"], utc=True)
+    cm["pm10"] = cm["pm10"].astype(float)
+    end = use["ts"].max().floor("D")
+    start = end - pd.Timedelta(days=days)
+    runs = {name: bt.run(use[["station_id", "ts", "pm10"]], wx, start, end, settings.horizon_hours, 24,
+                         settings.exceed_threshold, cams=c) for name, c in (("without", None), ("with_cams", cm))}
+    metrics = {k: r.metrics for k, r in runs.items()}
+    wx_used = wx[(wx["ts"] >= use["ts"].min()) & (wx["ts"] <= end)]
+    mode = ("live" if not wx_used["synthetic"].any() else "mixed") if is_real else "synthetic"
+    r0 = runs["without"]
+    note = (f"CAMS archive {cm['ts'].min():%Y-%m-%d} to {cm['ts'].max():%Y-%m-%d}; earlier training rows have no CAMS value. "
+            "The archive is CAMS's own forecast run, close to what a live forecast would see.") if len(cm) else "No CAMS data."
+    row = conn.execute(
+        """insert into backtests (ward_id, kind, data_mode, stations, train_end, test_end, origins, metrics, note)
+           values (%s,'cams_feature',%s,%s,%s,%s,%s,%s,%s) returning id""",
+        (settings.ward_id, mode, r0.stations, r0.train_end.to_pydatetime(), r0.test_end.to_pydatetime(), r0.origins,
+         json.dumps(metrics), note)).fetchone()
+    conn.commit()
+    return {"id": row[0], "data_mode": mode, "origins": r0.origins, "metrics": metrics}
+
+
+def backtest(conn, settings: Settings, days: int = 60) -> dict:
+    """Back-test the forecast over the last `days` days of data (F3). Uses only real station readings
+    when there are any, so the report's numbers are real; otherwise synthetic, and labelled so."""
+    wx, use, is_real = _backtest_inputs(conn, settings)
     end = use["ts"].max().floor("D")
     start = end - pd.Timedelta(days=days)
     res = bt.run(use[["station_id", "ts", "pm10"]], wx, start, end, settings.horizon_hours, 24, settings.exceed_threshold)

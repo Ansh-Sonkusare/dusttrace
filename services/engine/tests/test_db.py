@@ -375,3 +375,62 @@ def test_a_coarse_spike_at_a_real_station_reaches_the_agent(conn, settings):
     hyp = one(conn, """select hypotheses from cases where site_id='A' and closed_at is null""")[0]
     assert hyp  # the case exists; the signature moved its causes
     assert "dry_windy_hours" in one(conn, "select metrics from runs where id=%s", (out["run_id"],))[0]
+
+
+def _case_with_mist(conn, at):
+    cid = conn.execute("""insert into cases (site_id, state, triggers) values ('A', 'ACTING', '{forecast_spike}')
+                          returning id""").fetchone()[0]
+    aid = conn.execute("""insert into case_actions (case_id, phase, action, type, route, rule, reason, status, at)
+                          values (%s, 'final', 'SCHEDULE_MIST', 'preventive', 'auto', 'D2', 'test', 'done', %s)
+                          returning id""", (cid, at.to_pydatetime())).fetchone()[0]
+    return cid, aid
+
+
+def _downwind_station(conn, now, during):
+    """A real station 2 km east of Site A under a steady westerly, with 22 days of history."""
+    db.upsert_station(conn, {"id": "openaq-11", "name": "East of A", "source": "openaq", "lat": 19.117, "lon": 72.875}, "K-East")
+    ts = pd.date_range(end=now, periods=24 * 22, freq="h", tz="UTC")
+    wx = pd.DataFrame({"ts": ts, "wind_speed": 3.0, "wind_dir": 270.0, "blh": 600.0, "temp": 30.0, "rh": 60.0, "precip": 0.0})
+    db.write_weather(conn, "K-East", wx, now, synthetic=False)
+    pm = pd.Series(80.0, index=ts)
+    pm[(ts >= now - pd.Timedelta(hours=8)) & (ts < now - pd.Timedelta(hours=2))] = during
+    db.write_readings(conn, pd.DataFrame({"station_id": "openaq-11", "ts": ts, "pm10": pm.to_numpy(), "pm25": pm.to_numpy() * 0.4}),
+                      synthetic=False)
+    conn.commit()
+
+
+def test_a_verified_drop_closes_the_case(conn, settings):
+    now = pipeline.now_hour()
+    cid, aid = _case_with_mist(conn, now - pd.Timedelta(hours=8))
+    _downwind_station(conn, now, during=55.0)
+    out = pipeline.verify_actions(conn, "K-East", now)
+    assert out["checked"] == 1 and out["drop"] == 1
+    v = one(conn, "select station_id, verdict, round(change_pct) from verifications where action_id=%s", (aid,))
+    assert v[0] == "openaq-11" and v[1] == "drop" and v[2] < -25
+    assert one(conn, "select closed_at is not null, state from cases where id=%s", (cid,)) == (True, "DONE")
+    assert pipeline.verify_actions(conn, "K-East", now)["checked"] == 0  # each action is checked once
+
+
+def test_no_drop_keeps_the_case_open_and_a_dead_feed_is_insufficient(conn, settings):
+    now = pipeline.now_hour()
+    cid, aid = _case_with_mist(conn, now - pd.Timedelta(hours=8))
+    _downwind_station(conn, now, during=84.0)
+    assert pipeline.verify_actions(conn, "K-East", now)["no_drop"] == 1
+    assert one(conn, "select closed_at from cases where id=%s", (cid,))[0] is None
+    conn.execute("delete from verifications")
+    conn.execute("delete from readings where station_id='openaq-11' and ts > %s", ((now - pd.Timedelta(hours=10)).to_pydatetime(),))
+    conn.commit()
+    assert pipeline.verify_actions(conn, "K-East", now)["insufficient"] == 1
+    assert one(conn, "select verdict, note from verifications where action_id=%s", (aid,))[0] == "insufficient"
+
+
+def test_compare_cams_stores_both_variants_on_one_window(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=90)
+    rd = db.read_frame(conn, "select station_id, ts, pm10 from readings")
+    rd["ts"] = pd.to_datetime(rd["ts"], utc=True)
+    db.write_cams(conn, rd.assign(pm10=rd["pm10"].astype(float) * 0.6, pm25=None))
+    conn.commit()
+    out = pipeline.compare_cams(conn, settings, days=5)
+    assert set(out["metrics"]) == {"without", "with_cams"} and out["origins"] >= 3
+    kind, m = one(conn, "select kind, metrics from backtests where id=%s", (out["id"],))
+    assert kind == "cams_feature" and m["with_cams"]["1-24"]["n"] == m["without"]["1-24"]["n"]

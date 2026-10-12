@@ -58,15 +58,15 @@ def _ward_actual(readings: pd.DataFrame) -> pd.Series:
 
 
 def run(readings: pd.DataFrame, wx: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp,
-        horizon: int = 48, step_h: int = 24, threshold: float = 100.0) -> Result:
+        horizon: int = 48, step_h: int = 24, threshold: float = 100.0, cams: pd.DataFrame | None = None) -> Result:
     readings = readings.copy()
     readings["ts"] = pd.to_datetime(readings["ts"], utc=True)
-    model = forecast.train(readings[readings["ts"] < start], wx, horizon, threshold)
+    model = forecast.train(readings[readings["ts"] < start], wx, horizon, threshold, cams=cams)
     actual = _ward_actual(readings)
     origins = pd.date_range(start, end - pd.Timedelta(hours=horizon), freq=f"{step_h}h", tz="UTC")
     rows, issued = [], {}
     for t0 in origins:
-        fc = forecast.predict(model, readings[readings["ts"] <= t0], wx, t0, horizon)
+        fc = forecast.predict(model, readings[readings["ts"] <= t0], wx, t0, horizon, cams=cams)
         ward = fc[fc["station_id"] == "ward"].set_index("ts")
         if ward.empty or t0 not in actual.index:
             continue
