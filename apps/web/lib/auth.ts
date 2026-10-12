@@ -1,8 +1,8 @@
 // Console password (HTTP Basic). Ward data is sensitive, so the console sits behind DUSTTRACE_PASSWORD.
 // Resident pages (/s/…), site-manager plans (/plan/…, which carry their own signed token) and the
-// public report endpoint stay open.
+// public report endpoint and the read-only public API (/api/public/v1/…) stay open.
 
-const PUBLIC = [/^\/s\//, /^\/plan\//, /^\/api\/report$/, /^\/_next\//, /^\/maplibre\//, /^\/favicon\.ico$/];
+const PUBLIC = [/^\/s\//, /^\/plan\//, /^\/api\/report$/, /^\/api\/public\/v1\//, /^\/_next\//, /^\/maplibre\//, /^\/favicon\.ico$/];
 
 export type AuthResult = "ok" | "challenge" | "misconfigured";
 

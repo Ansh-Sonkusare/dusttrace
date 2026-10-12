@@ -349,3 +349,49 @@ export async function getVerifications(limit = 12): Promise<{ recent: Verificati
       where s.ward_id=$1 and v.verdict <> 'insufficient' group by v.action order by mean_change_pct`, [WARD]);
   return { recent: recent.map((r) => ({ ...r, window_start: iso(r.window_start) })), memory };
 }
+
+export interface WeeklyData {
+  forecast: { ts: string; p: number }[];
+  observed: { ts: string; pm10: number }[];
+  actions: { rule: string; action: string }[];
+  inspections: { outcome: string }[];
+  scores: { site_id: string; name: string; score: number; band: string; demo: boolean }[];
+  checks: { verdict: string }[];
+  real_hours: number; filled_or_synthetic_hours: number;
+}
+
+// Weekly ward report (F5, issue #37): the last 7 days. The forecast for each hour is the one issued
+// at least 12 hours ahead (a day-ahead call); observed is the ward mean of measured station readings.
+export async function getWeeklyData(): Promise<WeeklyData> {
+  const [forecast, observed, actions, inspections, run, checks, mix] = await Promise.all([
+    q<{ ts: string; p: number }>(
+      `select distinct on (f.ts) f.ts, f.p_exceed as p from forecasts f join runs r on r.id = f.run_id
+        where r.ward_id=$1 and f.station_id='ward' and f.ts > now() - interval '7 days' and f.ts <= now()
+          and r.issued_at <= f.ts - interval '12 hours'
+        order by f.ts, r.issued_at desc`, [WARD]),
+    q<{ ts: string; pm10: number }>(
+      `select r.ts, avg(r.pm10)::float as pm10 from readings r join stations s on s.id = r.station_id
+        where s.ward_id=$1 and not r.synthetic and r.pm10 is not null and r.ts > now() - interval '7 days'
+        group by r.ts order by r.ts`, [WARD]),
+    q<{ rule: string; action: string }>(
+      `select a.rule, a.action from case_actions a join cases c on c.id = a.case_id join sites s on s.id = c.site_id
+        where s.ward_id=$1 and a.phase='final' and a.created_at > now() - interval '7 days'`, [WARD]),
+    q<{ outcome: string }>(
+      `select i.outcome from inspections i join sites s on s.id = i.site_id where s.ward_id=$1 and i.at > now() - interval '7 days'`, [WARD]),
+    getLatestRun(),
+    q<{ verdict: string }>(
+      `select v.verdict from verifications v join sites s on s.id = v.site_id where s.ward_id=$1 and v.checked_at > now() - interval '7 days'`, [WARD]),
+    q<{ real: number; other: number }>(
+      `select count(*) filter (where not r.synthetic)::int as real, count(*) filter (where r.synthetic)::int as other
+         from readings r join stations s on s.id = r.station_id where s.ward_id=$1 and r.ts > now() - interval '7 days'`, [WARD]),
+  ]);
+  const scores = run ? await q<{ site_id: string; name: string; score: number; band: string; demo: boolean }>(
+    `select d.site_id, s.name, d.score, d.band, s.demo from dust_scores d join sites s on s.id = d.site_id
+      where d.run_id=$1 order by d.score`, [run.id]) : [];
+  return {
+    forecast: forecast.map((x) => ({ ts: iso(x.ts), p: Number(x.p) })),
+    observed: observed.map((x) => ({ ts: iso(x.ts), pm10: Number(x.pm10) })),
+    actions, inspections, scores, checks,
+    real_hours: mix[0]?.real ?? 0, filled_or_synthetic_hours: mix[0]?.other ?? 0,
+  };
+}
