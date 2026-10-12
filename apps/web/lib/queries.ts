@@ -17,6 +17,7 @@ export interface Run {
     holdout_rows?: number;
     train_rows?: number;
     stations?: string[];
+    audit?: { n: number; precision: number; recall: number; detected?: Record<string, number> };
   };
 }
 
@@ -26,6 +27,11 @@ export interface ObsPoint { ts: string; pm10: number }
 export interface Site { id: string; name: string; activity: string; developer: string | null; lat: number; lon: number; sensor_status: string; demo: boolean; area_m2: number }
 export interface Receptor { id: string; name: string; kind: "school" | "hospital" | "housing"; lat: number; lon: number; population: number; source: string }
 export interface Station { id: string; name: string; source: string; lat: number; lon: number }
+export type TrustBand = "trusted" | "check" | "untrusted";
+export interface Audit {
+  site_id: string; sensor_id: string; score: number; band: TrustBand; reasons: string[];
+  vendor: string | null; has_relay: boolean; simulated: boolean; injected_fault: string | null;
+}
 export interface WindowRow { site_id: string; ts: string; status: Status; exposed_people: number; sensitive_hit: boolean; reason: string }
 export interface PlumeRow { site_id: string; ts: string; geojson: string | null; max_conc: number }
 export interface WxRow { ts: string; wind_speed: number; wind_dir: number; blh: number }
@@ -135,5 +141,15 @@ export async function getSiteExposures(runId: number, siteId: string) {
        from exposures e join receptors r on r.id = e.receptor_id
       where e.run_id=$1 and e.site_id=$2 group by 1,2,3 order by peak desc`,
     [runId, siteId],
+  );
+}
+
+// Sensor trust (F1) from the run's audit, one row per site that has a sensor.
+export async function getAudits(runId: number, siteId?: string): Promise<Audit[]> {
+  return q<Audit>(
+    `select a.site_id, a.sensor_id, a.score, a.band, a.reasons, n.vendor, n.has_relay, n.simulated, n.injected_fault
+       from sensor_audits a join site_sensors n on n.id = a.sensor_id
+      where a.run_id=$1 and ($2::text is null or a.site_id=$2) order by a.site_id`,
+    [runId, siteId ?? null],
   );
 }

@@ -24,3 +24,16 @@ export const ACTIVITY_LABEL: Record<string, string> = {
   structure: "Structure work",
   debris: "Debris handling",
 };
+
+export const TRUST_LABEL = { trusted: "Trusted", check: "Check", untrusted: "Untrusted" } as const;
+export const TRUST_TONE = { trusted: "go", check: "caution", untrusted: "avoid" } as const;
+
+// What the simulator injected, in an officer's words.
+export const FAULT_LABEL: Record<string, string> = {
+  none: "no fault",
+  flatline: "stuck readings",
+  dropout: "switched off during work",
+  too_clean: "placed out of the dust",
+  drift: "calibration drift",
+  rh_bias: "humidity over-reading",
+};

@@ -82,3 +82,18 @@ def test_osm_schools_and_hospitals_replace_the_demo_ones(conn):
                                 "lon": 72.86, "population": 800, "source": "osm"}], "K-East")
     conn.commit()
     assert kinds() == [("housing", "seed"), ("school", "osm")]
+
+
+def test_run_audits_every_site_sensor(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    out = pipeline.run(conn, settings)
+    rows = conn.execute("""select a.site_id, a.score, a.band, a.reasons, s.injected_fault
+                             from sensor_audits a join site_sensors s on s.id = a.sensor_id
+                            where a.run_id=%s order by a.site_id""", (out["run_id"],)).fetchall()
+    assert [r[0] for r in rows] == ["A", "B", "C", "E", "F"]  # D, the unregistered debris yard, has no sensor
+    by_site = {r[0]: r for r in rows}
+    assert by_site["C"][4] == "too_clean" and by_site["C"][2] == "untrusted" and by_site["C"][3]
+    assert by_site["A"][4] == "none" and by_site["A"][2] == "trusted"
+    assert one(conn, "select bool_and(synthetic), count(*) > 0 from site_readings") == (True, True)
+    bench = out["metrics"]["audit"]
+    assert bench["precision"] >= 0.9 and bench["recall"] >= 0.85

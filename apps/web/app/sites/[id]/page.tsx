@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import WindowStrip from "@/components/WindowStrip";
 import NoRun from "@/components/Empty";
-import { getLatestRun, getSite, getSiteExposures, getWard, getWindows } from "@/lib/queries";
+import TrustPill from "@/components/TrustPill";
+import { getAudits, getLatestRun, getSite, getSiteExposures, getWard, getWindows } from "@/lib/queries";
 import { spans } from "@/lib/mapHours";
-import { ACTIVITY_LABEL, dayHour, hhmm, istHour, STATUS_LABEL } from "@/lib/format";
+import { ACTIVITY_LABEL, dayHour, FAULT_LABEL, hhmm, istHour, STATUS_LABEL, TRUST_TONE } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const [ward, run, site] = await Promise.all([getWard(), getLatestRun(), getSite(id)]);
   if (!site) notFound();
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
-  const [rows, exposures] = await Promise.all([getWindows(run.id, id), getSiteExposures(run.id, id)]);
+  const [rows, exposures, audits] = await Promise.all([getWindows(run.id, id), getSiteExposures(run.id, id), getAudits(run.id, id)]);
+  const audit = audits[0];
   const day = rows.filter((r) => { const h = istHour(r.ts); return h >= 8 && h < 20; });
   const goSpans = spans(day.filter((r) => r.status === "go")).sort((a, b) => b.rows.length - a.rows.length).slice(0, 3)
     .sort((a, b) => a.from.localeCompare(b.from));
@@ -63,6 +65,21 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                     <li key={s.from} className="item"><span className="bar" style={{ background: "var(--go)" }} />
                       <div><div className="hd"><b>{dayHour(s.from)}–{end(s.to)}</b> {s.rows.length} h</div></div></li>
                   ))}</ul>
+                )}
+              </div>
+            </section>
+            <section className="panel">
+              <div className="ph"><h2>Site sensor</h2><span className="meta"><TrustPill audit={audit} /></span></div>
+              <div className="pb">
+                {!audit ? <p className="small muted">No dust monitor registered. An active site without one is added to the inspection list (D6).</p> : (
+                  <>
+                    <p className="small muted">{audit.vendor ?? "Unknown make"}{audit.has_relay ? ", can switch misting remotely" : ""}. {audit.simulated ? `Simulated from real ambient data; injected fault: ${FAULT_LABEL[audit.injected_fault ?? "none"] ?? audit.injected_fault}.` : "Live feed."}</p>
+                    {audit.reasons.length === 0 ? <p className="small">All six checks passed: it reads above the stations while the site works, tracks the wind, and holds calibration.</p> : (
+                      <ul className="list">{audit.reasons.map((r) => (
+                        <li key={r} className="item"><span className="bar" style={{ background: `var(--${TRUST_TONE[audit.band]})` }} /><div><p style={{ margin: 0 }}>{r}</p></div></li>
+                      ))}</ul>
+                    )}
+                  </>
                 )}
               </div>
             </section>
