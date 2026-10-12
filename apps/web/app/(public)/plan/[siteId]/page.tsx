@@ -19,7 +19,8 @@ export default async function PlanPage({ params, searchParams }: {
   const [{ siteId }, { t = "" }] = await Promise.all([params, searchParams]);
   const secret = planSecret();
   if (!secret || !verifySite(siteId, t, secret)) notFound();
-  const [site, run, accepted] = await Promise.all([getSite(siteId), getLatestRun(), getLastAcceptance(siteId)]);
+  const [site, accepted] = await Promise.all([getSite(siteId), getLastAcceptance(siteId)]);
+  const run = site ? await getLatestRun(site.ward_id) : null;
   if (!site || !run) notFound();
   const rows = (await getWindows(run.id, siteId)).slice(0, 24);
   const holds = spans(rows).filter((s) => s.status === "avoid" && istHour(s.from) >= 6 && istHour(s.from) < 22);

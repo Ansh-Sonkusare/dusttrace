@@ -61,13 +61,14 @@ Writing rules: sentence case everywhere. No all-caps eyebrows, no labels stacked
 | Component | What it shows |
 |---|---|
 | `TopBar` | Ward name, forecast issue time (IST), data-mode pill: Live (green), Partly synthetic (amber), Synthetic (dust) |
-| `DustMap` | MapLibre, OpenFreeMap dark vector basemap (no key; CARTO now needs one); amber plume polygons, white school and hospital dots with labels, small unlabelled grey `#6F6F75` dots for estimated homes, teal stations, site discs coloured by status with the site letter; Play + hour slider; wind and legend line |
+| `DustMap` | MapLibre, OpenFreeMap dark vector basemap (no key; CARTO now needs one); amber plume polygons, white school and hospital dots with labels, small unlabelled grey `#6F6F75` dots for estimated homes, the ward's real boundary as a dashed grey `#A3A3A8` line, teal stations, site discs coloured by status with the site letter; Play + hour slider; wind and legend line |
 | `ForecastChart` | SVG: amber forecast line, 10–90% band at 14% opacity, grey observed line, white line at the 100 standard, "Now" marker, peak label, hover crosshair and tooltip |
 | `WindowStrip` | One cell per hour, Go / Caution / Avoid; night hours (22:00–06:00 IST) at 35% |
 | `.item` list | 4 px status bar on the left, bold head, muted reason |
 | `.banner` | Amber outline on dust tint, for honesty notices (synthetic data) |
 | `.pill` | Status or mode chip; tinted fill + coloured border |
 | `.meter` | Priority score as segments, one per component; upwind is the one amber segment, the rest are greys, with a key below |
+| `.wards` | Ward switcher in the top bar: a pill-shaped segmented control; the current ward is bold on the panel colour, the other is grey text. Never amber, never a status colour |
 | `@media print` | Weekly report prints on white: rail, top bar and banner hidden, panels kept whole |
 | `.meter.split` | Data check: where the run's station hours came from. Measured is light grey `#C9C9CE`, filled from CAMS is amber `--dust-mark`, synthetic is dark grey `#4A4A50`; key below with percentages |
 | Public site page (`/s/[id]`) | No console rail; one 640 px column, phone first. Big light score numeral, band pill (Good go, Fair caution, Poor avoid), grey part bars, demo banner, 44 px report choices |

@@ -1,3 +1,4 @@
+import { WARD_HEADER, pickWard } from "./wards";
 import { Pool } from "pg";
 
 declare global {
@@ -22,4 +23,8 @@ export async function q<T>(sql: string, params: unknown[] = []): Promise<T[]> {
   return res.rows as T[];
 }
 
-export const WARD = process.env.DUSTTRACE_WARD ?? "K-East";
+// The ward this request is about: set by proxy.ts from ?ward=, the cookie or DUSTTRACE_WARD.
+export async function ward(): Promise<string> {
+  const { headers } = await import("next/headers");
+  return pickWard((await headers()).get(WARD_HEADER), null, process.env.DUSTTRACE_WARD);
+}

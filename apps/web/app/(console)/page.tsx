@@ -45,7 +45,7 @@ export default async function Overview() {
         <div className="grid2">
           <section className="panel" aria-label="Plume map">
             <div className="ph"><h2>Plume map</h2><span className="meta">Gaussian plume, hourly</span></div>
-            <DustMap center={[ward.center_lon, ward.center_lat]} sites={sites} receptors={receptors} stations={stations} hours={hours} />
+            <DustMap center={[ward.center_lon, ward.center_lat]} boundary={ward.boundary} sites={sites} receptors={receptors} stations={stations} hours={hours} />
           </section>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <section className="panel" aria-label="Alerts">

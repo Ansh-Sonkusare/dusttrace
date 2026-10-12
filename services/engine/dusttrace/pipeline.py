@@ -13,7 +13,7 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 
 from . import agent, alerts, attribution, audit, backtest as bt, db, dust_score, fill, forecast, windows
-from . import effect, housing, signature, verify as verify_mod
+from . import effect, geo, housing, signature, verify as verify_mod
 from .config import Settings, load_seed
 from .sources import cams, ohsome, openaq, openmeteo, overpass, synthetic
 
@@ -29,7 +29,7 @@ def now_hour() -> pd.Timestamp:
 
 def ingest(conn, settings: Settings, mode: str = "auto", days: int = 120) -> dict:
     """Load weather (history + 3-day forecast) and station readings. Returns what was loaded and how."""
-    seed = load_seed()
+    seed = load_seed(settings.ward_id)
     ward = seed["ward"]
     now = now_hour()
     report = {"weather": None, "readings": None}
@@ -149,7 +149,7 @@ def fetch_osm_receptors(bbox: list[float]) -> tuple[list[dict], str]:
 
 
 def load_receptors_osm(conn, settings: Settings) -> int:
-    seed = load_seed()
+    seed = load_seed(settings.ward_id)
     recs, source = fetch_osm_receptors(receptor_bbox(seed["ward"]["bbox"]))
     log.info("%d schools and hospitals from %s", len(recs), source)
     db.upsert_receptors(conn, recs, seed["ward"]["id"])
@@ -160,18 +160,18 @@ def load_receptors_osm(conn, settings: Settings) -> int:
 def load_housing_osm(conn, settings: Settings) -> dict:
     """Real housing exposure (issue #31): Census 2011 people spread over OSM residential land,
     one receptor per ~250 m cell with homes in it."""
-    seed = load_seed()
+    seed = load_seed(settings.ward_id)
     ward_id, ward_bbox = seed["ward"]["id"], seed["ward"]["bbox"]
     cells = housing.grid(receptor_bbox(ward_bbox))
     areas = ohsome.area_by_cell(cells)
-    ward_cells = housing.in_box(cells, ward_bbox)
+    ward_cells = housing.in_ward(cells, seed["ward"])  # the census counts people inside the ward boundary
     ward_area = sum(areas.get(c["id"], 0.0) for c in ward_cells)
     census = housing.CENSUS_2011[ward_id]
     density = housing.people_per_m2(census, ward_area)
-    recs = housing.receptors(cells, areas, density)
+    recs = housing.receptors(cells, areas, density, ward_id=ward_id)
     db.replace_osm_housing(conn, recs, ward_id)
     conn.commit()
-    in_ward = {f"res-{c['id']}" for c in ward_cells}
+    in_ward = {f"res-{ward_id.lower()}-{c['id']}" for c in ward_cells}
     return {"receptors": len(recs), "residential_km2": round(ward_area / 1e6, 2),
             "people_per_km2_of_homes": round(density * 1e6), "census_2011": census,
             "population_in_ward": sum(r["population"] for r in recs if r["id"] in in_ward),
@@ -192,9 +192,11 @@ def fetch_osm_sites(bbox: list[float]) -> tuple[list[dict], str]:
 
 def load_sites_osm(conn, settings: Settings) -> int:
     """Construction sites mapped in OpenStreetMap inside the ward (issue #30). Real, not demo."""
-    seed = load_seed()
+    seed = load_seed(settings.ward_id)
     sites, source = fetch_osm_sites(seed["ward"]["bbox"])
+    sites = [s for s in sites if geo.in_ward(s["lat"], s["lon"], seed["ward"])]  # the box overlaps neighbours
     db.upsert_sites(conn, sites, seed["ward"]["id"])
+    db.retire_osm_sites(conn, seed["ward"]["id"], [s["id"] for s in sites])
     conn.commit()
     log.info("%d construction sites from %s", len(sites), source)
     return len(sites)
@@ -335,7 +337,7 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
     sites = db.read_frame(conn, """select s.id, s.name, s.activity, s.lat, s.lon, n.id is not null as has_sensor,
                                           coalesce(n.has_relay, false) as has_relay
                                      from sites s left join site_sensors n on n.site_id = s.id
-                                    where s.ward_id=%s order by s.id""", (ward_id,))
+                                    where s.ward_id=%s and s.active order by s.id""", (ward_id,))
     if run_sites is not None:  # the sites this run covers (demo ones may be switched off)
         known = run_sites.set_index("id")["sensor_known"].to_dict()
         sites = sites[sites["id"].isin(known)]
@@ -628,7 +630,7 @@ def discover_sites(conn, settings: Settings, months_back: int = 12) -> dict:
     months a year earlier. Stores the candidates; matched ones count as a signal for the agent."""
     from . import discover
 
-    seed = load_seed()
+    seed = load_seed(settings.ward_id)
     sites = [{"id": r.id, "lat": float(r.lat), "lon": float(r.lon)} for r in
              db.read_frame(conn, "select id, lat, lon from sites where ward_id=%s", (settings.ward_id,)).itertuples()]
     now = pd.Timestamp.now(tz="UTC")

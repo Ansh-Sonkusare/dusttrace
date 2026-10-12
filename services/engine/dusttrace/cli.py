@@ -17,17 +17,19 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import logging
 import sys
 
 from . import db, pipeline
-from .config import load_seed, load_settings
+from .config import WARDS, load_seed, load_settings
 
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     p = argparse.ArgumentParser(prog="dusttrace")
+    p.add_argument("--ward", choices=sorted(WARDS), help="pilot ward (default: DUSTTRACE_WARD, else K-East)")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init-db")
     sub.add_parser("seed")
@@ -51,11 +53,13 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     settings = load_settings()
+    if args.ward:
+        settings = dataclasses.replace(settings, ward_id=args.ward)
     with db.connect(settings.database_url) as conn:
         if args.cmd in ("init-db", "all"):
             print("migrations:", db.migrate(conn))
         if args.cmd in ("seed", "all"):
-            db.upsert_seed(conn, load_seed())
+            db.upsert_seed(conn, load_seed(settings.ward_id))
             print("seeded ward, stations, sites, receptors")
         if args.cmd == "osm":
             print("receptors from OSM:", pipeline.load_receptors_osm(conn, settings))

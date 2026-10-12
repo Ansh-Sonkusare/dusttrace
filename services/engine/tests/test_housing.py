@@ -30,10 +30,12 @@ def test_cells_with_enough_homes_become_estimated_housing_receptors():
              {"id": "c0_1", "bbox": [72.8524, 19.10, 72.8548, 19.1023], "lat": 19.10115, "lon": 72.8536},
              {"id": "c0_2", "bbox": [72.8548, 19.10, 72.8572, 19.1023], "lat": 19.10115, "lon": 72.856}]
     areas = {"c0_0": 40_000.0, "c0_1": 1_000.0, "c0_2": 0.0}
-    recs = housing.receptors(cells, areas, people_per_m2=0.1, min_area_m2=3_000)
+    recs = housing.receptors(cells, areas, people_per_m2=0.1, min_area_m2=3_000, ward_id="K-East")
     assert len(recs) == 1
     r = recs[0]
-    assert r["id"] == "res-c0_0" and r["kind"] == "housing" and r["source"] == "osm"
+    assert r["id"] == "res-k-east-c0_0" and r["kind"] == "housing" and r["source"] == "osm"
+    # each ward's grid starts at c0_0, so ids must carry the ward or one ward overwrites the other
+    assert housing.receptors(cells, areas, 0.1, ward_id="P-North")[0]["id"] == "res-p-north-c0_0"
     assert r["population"] == 4_000 and r["name"] == "Homes for about 4,000 people (estimated)"
     assert (r["lat"], r["lon"]) == (19.10115, 72.8512)
 

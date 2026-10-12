@@ -11,9 +11,15 @@ on:
 jobs:
   discover:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false   # one ward's outage shouldn't stop the other
+      max-parallel: 1
+      matrix:
+        ward: [K-East, P-North]
     timeout-minutes: 20
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DUSTTRACE_WARD: ${{ matrix.ward }}
     defaults:
       run:
         working-directory: services/engine
