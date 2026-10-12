@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pandas as pd
 
-from . import audit, db, forecast, windows
+from . import attribution, audit, db, forecast, windows
 from .config import Settings, load_seed
 from .sources import openaq, openmeteo, overpass, synthetic
 
@@ -156,12 +156,30 @@ def run(conn, settings: Settings) -> dict:
         recs[c] = recs[c].astype(float)
     hours = windows.evaluate(sites, recs, future, ward_fc, settings)
     db.write_site_hours(conn, run_id, hours)
+    ranked = rank_sites(conn, ward_id, sites, list(active), future, ward_fc, audits)
+    db.write_ranking(conn, run_id, ranked)
     conn.commit()
 
     counts = pd.Series([h.status for h in hours]).value_counts().to_dict()
     return {"run_id": run_id, "issued_at": t0.isoformat(), "data_mode": data_mode,
             "metrics": metrics, "window_counts": counts, "stations": list(active),
             "sensor_trust": {a.site_id: a.score for a in audits}}
+
+
+def rank_sites(conn, ward_id: str, sites: pd.DataFrame, station_ids: list[str], future: pd.DataFrame,
+               ward_p: pd.Series, audits) -> list:
+    """The ranked inspection list (F4) for the next 24 h of the forecast."""
+    st = db.read_frame(conn, "select id, name, lat, lon from stations where id = any(%s)", (station_ids,))
+    stations = [{"id": r.id, "name": r.name, "lat": float(r.lat), "lon": float(r.lon)} for r in st.itertuples()]
+    site_list = [{"id": r.id, "name": r.name, "lat": r.lat, "lon": r.lon} for r in sites.itertuples()]
+    up = attribution.upwind_details(site_list, stations, future.head(24), ward_p)
+    trust = {a.site_id: a.score for a in audits}
+    signals = db.site_signals(conn, ward_id)
+    rows = [{"site_id": s["id"], "name": s["name"], "upwind": up[s["id"]]["exposure"],
+             "upwind_station": up[s["id"]]["station"], "upwind_hours": up[s["id"]]["hours"],
+             "trust": trust.get(s["id"]), "has_sensor": s["id"] in trust,
+             **signals.get(s["id"], {})} for s in site_list]
+    return attribution.rank(rows)
 
 
 def audit_sensors(conn, ward_id: str, rd: pd.DataFrame, wx: pd.DataFrame, t0: pd.Timestamp):

@@ -63,6 +63,7 @@ Overpass (schools, hosp.) ─┘                                (LightGBM + Gaus
   - Each site's sensor reads ambient + near-field dust while the site works + its plume when downwind. Faults are injected per `data/seed/k-east.json` (C too clean, E flatline, F dropout; D has no sensor).
   - Seven checks over 7 days (dropout, flatline, neighbour, working-hours signature, placement, humidity, drift) give a 0–100 score: trusted 70+, check 40–69, untrusted < 40 (D5).
   - Each run also scores a 50-sensor benchmark; its precision/recall are in `runs.metrics.audit`.
+- `attribution.py` (F4): back-trajectories from each station through the next 24 forecast hours (weighted by P(PM10 > 100) ≥ 0.4) give each site an upwind score. Priority = 0.35·upwind + 0.25·(1 − trust) + 0.15·reports + 0.15·unsensored + 0.10·violations, in points out of 100, with the top two reasons. Stored in `inspection_rank`; shown on `/inspect`.
 - `windows.py`:
   - **Avoid** if a school or hospital gets ≥ 40 µg/m³ added, or any receptor gets ≥ 40 while P(PM10 > 100) ≥ 0.6.
   - **Caution** if any receptor gets ≥ 15, or P ≥ 0.6.

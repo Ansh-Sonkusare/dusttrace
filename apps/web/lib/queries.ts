@@ -153,3 +153,18 @@ export async function getAudits(runId: number, siteId?: string): Promise<Audit[]
     [runId, siteId ?? null],
   );
 }
+
+export interface RankRow {
+  site_id: string; name: string; rank: number; score: number; reasons: string[];
+  components: { upwind: number; trust: number; reports: number; unsensored: number; violations: number };
+  demo: boolean; lat: number; lon: number;
+}
+
+// The ranked "Inspect today" list (F4) for a run.
+export async function getRanking(runId: number): Promise<RankRow[]> {
+  return q<RankRow>(
+    `select r.site_id, s.name, r.rank, r.score, r.reasons, r.components, s.demo, s.lat, s.lon
+       from inspection_rank r join sites s on s.id = r.site_id where r.run_id=$1 order by r.rank`,
+    [runId],
+  );
+}
