@@ -202,3 +202,12 @@ def test_accepted_plans_count_as_windows_followed(conn, settings):
     second = pipeline.run(conn, settings)
     comp = one(conn, "select components->>'windows' from dust_scores where run_id=%s and site_id='A'", (second["run_id"],))
     assert float(comp[0]) == 20.0
+
+
+def test_run_logs_ward_alerts_with_actions(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    out = pipeline.run(conn, settings)
+    rows = conn.execute("select kind, site_id, case_id, title, action from alerts where run_id=%s", (out["run_id"],)).fetchall()
+    sensor = [r for r in rows if r[0] == "sensor"]
+    assert [r[1] for r in sensor] == ["C"] and sensor[0][2] is not None and sensor[0][4]
+    assert all(r[4] for r in rows)
