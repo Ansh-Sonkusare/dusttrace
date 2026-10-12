@@ -6,7 +6,7 @@ Start with `HANDOFF.md` (context, status, next steps) and `docs/design-system.md
 - `services/engine`: Python package `dusttrace` (ingest, LightGBM forecast, Gaussian plume, Safe-Work Windows). CLI: `python -m dusttrace <cmd>`.
 - `apps/web`: Next.js 16 App Router console (React 19, TypeScript 5, `pg`, MapLibre). Server components query Postgres directly in `lib/queries.ts`. Console pages live in `app/(console)` (rail layout, password); resident pages in `app/(public)` (no console chrome).
 - `supabase/migrations`: SQL schema (Postgres 16 + PostGIS). Add new numbered files; never edit applied ones. Every migration must be safe to re-run (the hourly job runs `init-db`), and every new table gets `enable row level security`.
-- `data/seed/k-east.json`: ward, seed stations, demo sites and receptors (approximate positions, `demo: true`).
+- `data/seed/k-east.json`: ward (with its real OSM boundary), seed stations, demo sites and receptors (approximate positions, `demo: true`). `data/seed/p-north.json`: the second pilot ward, real data only (no demo sites). Engine commands take `--ward`.
 - `docs/`: PRD, pitch deck (PDF, PPTX, HTML source), prototype, video kit, screenshots.
 
 ## Commands

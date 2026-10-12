@@ -1,4 +1,4 @@
-import { q, WARD } from "./db";
+import { q, ward } from "./db";
 
 export type Status = "go" | "caution" | "avoid";
 
@@ -24,10 +24,10 @@ export interface Run {
   };
 }
 
-export interface Ward { id: string; name: string; center_lat: number; center_lon: number; bbox: number[] }
+export interface Ward { id: string; name: string; center_lat: number; center_lon: number; bbox: number[]; boundary?: { type: "Polygon"; coordinates: number[][][] } | null }
 export interface FcPoint { ts: string; pm10: number; pm10_lo: number; pm10_hi: number; p_exceed: number }
 export interface ObsPoint { ts: string; pm10: number }
-export interface Site { id: string; name: string; activity: string; developer: string | null; lat: number; lon: number; sensor_status: string; demo: boolean; area_m2: number; source: string }
+export interface Site { id: string; name: string; activity: string; developer: string | null; lat: number; lon: number; sensor_status: string; demo: boolean; area_m2: number; source: string; ward_id: string }
 export interface Receptor { id: string; name: string; kind: "school" | "hospital" | "housing"; lat: number; lon: number; population: number; source: string }
 export interface Station { id: string; name: string; source: string; lat: number; lon: number }
 export type TrustBand = "trusted" | "check" | "untrusted";
@@ -41,13 +41,14 @@ export interface WxRow { ts: string; wind_speed: number; wind_dir: number; blh: 
 
 const iso = (d: unknown) => new Date(d as string).toISOString();
 
-export async function getWard(): Promise<Ward | null> {
-  const r = await q<Ward>("select id, name, center_lat, center_lon, bbox from wards where id=$1", [WARD]);
+export async function getWard(wardId?: string): Promise<Ward | null> {
+  const r = await q<Ward>("select id, name, center_lat, center_lon, bbox, boundary from wards where id=$1", [wardId ?? await ward()]);
   return r[0] ?? null;
 }
 
-export async function getLatestRun(): Promise<Run | null> {
-  const r = await q<Run>("select * from latest_run where ward_id=$1", [WARD]);
+// Public site pages pass the site's own ward; console pages use the ward the viewer picked.
+export async function getLatestRun(wardId?: string): Promise<Run | null> {
+  const r = await q<Run>("select * from latest_run where ward_id=$1", [wardId ?? await ward()]);
   if (!r[0]) return null;
   return { ...r[0], id: Number(r[0].id), issued_at: iso(r[0].issued_at), created_at: iso(r[0].created_at) };
 }
@@ -81,17 +82,17 @@ export async function getObserved(issuedAt: string, stationIds: string[] | undef
       where s.ward_id=$1 and r.ts > $2::timestamptz - make_interval(hours => $3) and r.ts <= $2::timestamptz
         and r.pm10 is not null and ($4::text[] is null or r.station_id = any($4))
       group by 1 order by 1`,
-    [WARD, issuedAt, hours, stationIds ?? null],
+    [await ward(), issuedAt, hours, stationIds ?? null],
   );
   return r.map((p) => ({ ...p, ts: iso(p.ts) }));
 }
 
 export async function getSites(): Promise<Site[]> {
-  return q<Site>("select id, name, activity, developer, lat, lon, sensor_status, demo, area_m2, source from sites where ward_id=$1 order by demo, id", [WARD]);
+  return q<Site>("select id, name, activity, developer, lat, lon, sensor_status, demo, area_m2, source, ward_id from sites where ward_id=$1 and active order by demo, id", [await ward()]);
 }
 
 export async function getSite(id: string): Promise<Site | null> {
-  const r = await q<Site>("select id, name, activity, developer, lat, lon, sensor_status, demo, area_m2, source from sites where id=$1", [id]);
+  const r = await q<Site>("select id, name, activity, developer, lat, lon, sensor_status, demo, area_m2, source, ward_id from sites where id=$1", [id]);
   return r[0] ?? null;
 }
 
@@ -101,14 +102,14 @@ export async function getReceptors(): Promise<Receptor[]> {
     `select id, name, kind, lat, lon, population, source from receptors r
       where ward_id=$1 and not (source = 'seed' and kind in ('school', 'hospital') and exists (
         select 1 from receptors o where o.ward_id = r.ward_id and o.source = 'osm'))`,
-    [WARD],
+    [await ward()],
   );
 }
 
 export async function getStations(ids?: string[]): Promise<Station[]> {
   return q<Station>(
     "select id, name, source, lat, lon from stations where ward_id=$1 and ($2::text[] is null or id = any($2))",
-    [WARD, ids ?? null],
+    [await ward(), ids ?? null],
   );
 }
 
@@ -133,7 +134,7 @@ export async function getWeather(fromTs: string, hours = 48): Promise<WxRow[]> {
   const r = await q<WxRow>(
     `select ts, wind_speed, wind_dir, blh from weather_hourly
       where ward_id=$1 and ts > $2::timestamptz and ts <= $2::timestamptz + make_interval(hours => $3) order by ts`,
-    [WARD, fromTs, hours],
+    [await ward(), fromTs, hours],
   );
   return r.map((w) => ({ ...w, ts: iso(w.ts) }));
 }
@@ -191,7 +192,7 @@ export async function getOpenCases(): Promise<CaseRow[]> {
        from cases c join sites s on s.id = c.site_id
       where c.closed_at is null and s.ward_id=$1
       order by (select count(*) from case_actions a where a.case_id = c.id and a.status='proposed') desc, c.site_id`,
-    [WARD],
+    [await ward()],
   );
   return rows.map((r) => ({ ...r, opened_at: iso(r.opened_at), updated_at: iso(r.updated_at) }));
 }
@@ -202,7 +203,7 @@ export async function getRecentInspections(limit = 10): Promise<Inspection[]> {
   const r = await q<Inspection>(
     `select i.id, i.site_id, s.name as site_name, i.outcome, i.note, i.officer, i.at
        from inspections i join sites s on s.id = i.site_id where s.ward_id=$1 order by i.at desc limit $2`,
-    [WARD, limit],
+    [await ward(), limit],
   );
   return r.map((x) => ({ ...x, at: iso(x.at) }));
 }
@@ -269,7 +270,7 @@ export async function getKpis(run: Run): Promise<import("./kpi").KpiRaw> {
           where c.closed_at is null and a.phase='final' and a.status='proposed') as decisions,
        (select count(*)::int from citizen_reports cr join sites s on s.id = cr.site_id
           where s.ward_id=$3 and cr.status='new') as reports`,
-    [run.id, run.issued_at, WARD],
+    [run.id, run.issued_at, await ward()],
   );
   const x = r[0];
   return { spike_p_tomorrow: x.spike == null ? null : Number(x.spike), sites_holding: x.holding, untrusted: x.untrusted,
@@ -287,7 +288,7 @@ export interface Backtest {
 export async function getLatestBacktest(kind: "standard" | "outage_replay" = "standard"): Promise<Backtest | null> {
   const r = await q<Backtest>(
     `select id, created_at, data_mode, stations, train_end, test_end, origins, metrics, spike_day, note
-       from backtests where ward_id=$1 and kind=$2 order by created_at desc limit 1`, [WARD, kind]);
+       from backtests where ward_id=$1 and kind=$2 order by created_at desc limit 1`, [await ward(), kind]);
   return r[0] ? { ...r[0], created_at: iso(r[0].created_at), train_end: iso(r[0].train_end), test_end: iso(r[0].test_end) } : null;
 }
 
@@ -297,7 +298,7 @@ export interface Candidate { id: number; lat: number; lon: number; area_m2: numb
 export async function getCandidates(limit = 8): Promise<{ unmatched: Candidate[]; matched: string[]; total: number }> {
   const rows = await q<Candidate>(
     `select id, lat, lon, area_m2, site_id, scene_before, scene_after, found_at from site_candidates
-      where ward_id=$1 and status <> 'rejected' order by area_m2 desc`, [WARD]);
+      where ward_id=$1 and status <> 'rejected' order by area_m2 desc`, [await ward()]);
   return {
     unmatched: rows.filter((r) => !r.site_id).slice(0, limit),
     matched: [...new Set(rows.filter((r) => r.site_id).map((r) => r.site_id as string))].sort(),
@@ -319,10 +320,10 @@ export interface DataCheck {
 export async function getLatestDataCheck(): Promise<DataCheck | null> {
   const r = await q<DataCheck>(
     `select id, run_id, checked_at, ok, shares, stations, cams, sources, problems
-       from data_checks where ward_id=$1 order by id desc limit 1`, [WARD]);
+       from data_checks where ward_id=$1 order by id desc limit 1`, [await ward()]);
   if (!r[0]) return null;
   const names = Object.fromEntries((await q<{ id: string; name: string }>(
-    "select id, name from stations where ward_id=$1", [WARD])).map((s) => [s.id, s.name]));
+    "select id, name from stations where ward_id=$1", [await ward()])).map((s) => [s.id, s.name]));
   const c = r[0];
   return { ...c, run_id: Number(c.run_id), checked_at: iso(c.checked_at),
            stations: c.stations.map((s) => ({ ...s, name: names[s.station_id] ?? s.station_id })) };
@@ -341,12 +342,12 @@ export async function getVerifications(limit = 12): Promise<{ recent: Verificati
     `select v.id, v.site_id, s.name as site_name, v.action, st.name as station, v.window_start, v.during, v.baseline,
             v.change_pct, v.days, v.verdict, v.note
        from verifications v join sites s on s.id = v.site_id left join stations st on st.id = v.station_id
-      where s.ward_id=$1 order by v.checked_at desc, v.id desc limit $2`, [WARD, limit]);
+      where s.ward_id=$1 order by v.checked_at desc, v.id desc limit $2`, [await ward(), limit]);
   const memory = await q<FixMemory>(
     `select v.action, count(*)::int as n, round(avg(v.change_pct)::numeric, 1)::float as mean_change_pct,
             count(*) filter (where v.verdict = 'drop')::int as drops
        from verifications v join sites s on s.id = v.site_id
-      where s.ward_id=$1 and v.verdict <> 'insufficient' group by v.action order by mean_change_pct`, [WARD]);
+      where s.ward_id=$1 and v.verdict <> 'insufficient' group by v.action order by mean_change_pct`, [await ward()]);
   return { recent: recent.map((r) => ({ ...r, window_start: iso(r.window_start) })), memory };
 }
 
@@ -368,22 +369,22 @@ export async function getWeeklyData(): Promise<WeeklyData> {
       `select distinct on (f.ts) f.ts, f.p_exceed as p from forecasts f join runs r on r.id = f.run_id
         where r.ward_id=$1 and f.station_id='ward' and f.ts > now() - interval '7 days' and f.ts <= now()
           and r.issued_at <= f.ts - interval '12 hours'
-        order by f.ts, r.issued_at desc`, [WARD]),
+        order by f.ts, r.issued_at desc`, [await ward()]),
     q<{ ts: string; pm10: number }>(
       `select r.ts, avg(r.pm10)::float as pm10 from readings r join stations s on s.id = r.station_id
         where s.ward_id=$1 and not r.synthetic and r.pm10 is not null and r.ts > now() - interval '7 days'
-        group by r.ts order by r.ts`, [WARD]),
+        group by r.ts order by r.ts`, [await ward()]),
     q<{ rule: string; action: string }>(
       `select a.rule, a.action from case_actions a join cases c on c.id = a.case_id join sites s on s.id = c.site_id
-        where s.ward_id=$1 and a.phase='final' and a.created_at > now() - interval '7 days'`, [WARD]),
+        where s.ward_id=$1 and a.phase='final' and a.created_at > now() - interval '7 days'`, [await ward()]),
     q<{ outcome: string }>(
-      `select i.outcome from inspections i join sites s on s.id = i.site_id where s.ward_id=$1 and i.at > now() - interval '7 days'`, [WARD]),
+      `select i.outcome from inspections i join sites s on s.id = i.site_id where s.ward_id=$1 and i.at > now() - interval '7 days'`, [await ward()]),
     getLatestRun(),
     q<{ verdict: string }>(
-      `select v.verdict from verifications v join sites s on s.id = v.site_id where s.ward_id=$1 and v.checked_at > now() - interval '7 days'`, [WARD]),
+      `select v.verdict from verifications v join sites s on s.id = v.site_id where s.ward_id=$1 and v.checked_at > now() - interval '7 days'`, [await ward()]),
     q<{ real: number; other: number }>(
       `select count(*) filter (where not r.synthetic)::int as real, count(*) filter (where r.synthetic)::int as other
-         from readings r join stations s on s.id = r.station_id where s.ward_id=$1 and r.ts > now() - interval '7 days'`, [WARD]),
+         from readings r join stations s on s.id = r.station_id where s.ward_id=$1 and r.ts > now() - interval '7 days'`, [await ward()]),
   ]);
   const scores = run ? await q<{ site_id: string; name: string; score: number; band: string; demo: boolean }>(
     `select d.site_id, s.name, d.score, d.band, s.demo from dust_scores d join sites s on s.id = d.site_id

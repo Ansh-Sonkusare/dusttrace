@@ -30,10 +30,11 @@ def migrate(conn: psycopg.Connection) -> list[str]:
 def upsert_seed(conn: psycopg.Connection, seed: dict) -> None:
     w = seed["ward"]
     conn.execute(
-        """insert into wards (id, name, center_lat, center_lon, bbox) values (%s,%s,%s,%s,%s)
+        """insert into wards (id, name, center_lat, center_lon, bbox, boundary) values (%s,%s,%s,%s,%s,%s)
            on conflict (id) do update set name=excluded.name, center_lat=excluded.center_lat,
-           center_lon=excluded.center_lon, bbox=excluded.bbox""",
-        (w["id"], w["name"], w["center_lat"], w["center_lon"], w["bbox"]),
+           center_lon=excluded.center_lon, bbox=excluded.bbox, boundary=excluded.boundary""",
+        (w["id"], w["name"], w["center_lat"], w["center_lon"], w["bbox"],
+         json.dumps(w["boundary"]) if w.get("boundary") else None),
     )
     for s in seed["stations"]:
         upsert_station(conn, {**s, "source": "seed"}, w["id"])
@@ -72,7 +73,7 @@ def upsert_sites(conn, sites: list[dict], ward_id: str) -> int:
             """insert into sites (id, name, activity, developer, lat, lon, ward_id, area_m2, sensor_status, demo, source)
                values (%s,%s,%s,%s,%s,%s,%s,%s,'not_connected',false,%s)
                on conflict (id) do update set name=excluded.name, activity=excluded.activity,
-               lat=excluded.lat, lon=excluded.lon, area_m2=excluded.area_m2, updated_at=now()""",
+               lat=excluded.lat, lon=excluded.lon, area_m2=excluded.area_m2, active=true, updated_at=now()""",
             (s["id"], s["name"], s["activity"], s.get("developer"), s["lat"], s["lon"], ward_id,
              s.get("area_m2", 5000), s.get("source", "osm")),
         )
@@ -82,10 +83,15 @@ def upsert_sites(conn, sites: list[dict], ward_id: str) -> int:
 def upsert_station(conn, s: dict, ward_id: str) -> None:
     meta = {k: v for k, v in s.items() if k in ("sensors", "provider")}
     conn.execute(
-        """insert into stations (id, name, source, lat, lon, ward_id, meta) values (%s,%s,%s,%s,%s,%s,%s)
+        # A station belongs to the ward whose centre is nearest, whichever ward's search found it.
+        """insert into stations (id, name, source, lat, lon, ward_id, meta)
+           values (%s,%s,%s,%s,%s, coalesce((
+             select w.id from wards w
+              order by power(w.center_lat - %s, 2) + power((w.center_lon - %s) * cos(radians(%s)), 2), w.id
+              limit 1), %s), %s)
            on conflict (id) do update set name=excluded.name, lat=excluded.lat, lon=excluded.lon,
-           meta=excluded.meta""",
-        (s["id"], s["name"], s["source"], s["lat"], s["lon"], ward_id, json.dumps(meta)),
+           meta=excluded.meta, ward_id=excluded.ward_id""",
+        (s["id"], s["name"], s["source"], s["lat"], s["lon"], s["lat"], s["lon"], s["lat"], ward_id, json.dumps(meta)),
     )
 
 
@@ -211,6 +217,12 @@ def _f(v):
         return None
 
 
+def retire_osm_sites(conn, ward_id: str, keep: list[str]) -> int:
+    """OSM sites the latest pull no longer returns inside the ward stop being planned; history stays."""
+    return conn.execute("""update sites set active=false, updated_at=now() where ward_id=%s and source='osm'
+                           and active and not (id = any(%s))""", (ward_id, keep)).rowcount
+
+
 def demo_sites() -> bool:
     """Whether the run includes the demo sites. DUSTTRACE_DEMO_SITES=0 leaves only real ones."""
     return os.environ.get("DUSTTRACE_DEMO_SITES", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -220,7 +232,7 @@ def read_sites(conn, ward_id: str) -> pd.DataFrame:
     """The ward's sites for a run, with whether each site's monitor status is known."""
     df = read_frame(conn, """select s.id, s.name, s.activity, s.lat, s.lon, s.area_m2,
                                     s.sensor_status <> 'not_connected' as sensor_known
-                               from sites s where s.ward_id=%s and (%s or not s.demo) order by s.id""",
+                               from sites s where s.ward_id=%s and s.active and (%s or not s.demo) order by s.id""",
                     (ward_id, demo_sites()))
     for c in ["lat", "lon", "area_m2"]:
         df[c] = df[c].astype(float)

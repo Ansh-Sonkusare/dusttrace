@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SEED_PATH = REPO_ROOT / "data" / "seed" / "k-east.json"
+SEED_DIR = REPO_ROOT / "data" / "seed"
+# The pilot wards (PRD Round 2): K-East (Andheri East) and P-North (Malad).
+WARDS = {"K-East": "k-east.json", "P-North": "p-north.json"}
+SEED_PATH = SEED_DIR / WARDS["K-East"]
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,6 @@ def load_settings() -> Settings:
     )
 
 
-def load_seed(path: Path = SEED_PATH) -> dict:
-    with open(path, encoding="utf-8") as f:
+def load_seed(ward_id: str = "K-East") -> dict:
+    with open(SEED_DIR / WARDS[ward_id], encoding="utf-8") as f:
         return json.load(f)

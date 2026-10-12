@@ -20,8 +20,9 @@ if (typeof window !== "undefined") maplibregl.setWorkerUrl("/maplibre/maplibre-g
 const STATUS_COLOR: Record<Status, string> = { go: "#6CC59A", caution: "#E0A245", avoid: "#EB6E5B" };
 const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
 
-export default function DustMap({ center, sites, receptors, stations, hours }: {
+export default function DustMap({ center, sites, receptors, stations, hours, boundary }: {
   center: [number, number];
+  boundary?: { type: "Polygon"; coordinates: number[][][] } | null;
   sites: Site[];
   receptors: Receptor[];
   stations: Station[];
@@ -46,6 +47,10 @@ export default function DustMap({ center, sites, receptors, stations, hours }: {
     });
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     m.on("load", () => {
+      if (boundary) {  // the ward's real boundary (OpenStreetMap), a quiet dashed outline under everything
+        m.addSource("ward", { type: "geojson", data: { type: "Feature", properties: {}, geometry: boundary } });
+        m.addLayer({ id: "ward-line", type: "line", source: "ward", paint: { "line-color": "#A3A3A8", "line-width": 1.5, "line-dasharray": [3, 2], "line-opacity": 0.8 } });
+      }
       m.addSource("plumes", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       m.addLayer({ id: "plume-fill", type: "fill", source: "plumes", paint: { "fill-color": "#E0A245", "fill-opacity": ["interpolate", ["linear"], ["get", "max_conc"], 50, 0.18, 500, 0.4] } });
       m.addLayer({ id: "plume-line", type: "line", source: "plumes", paint: { "line-color": "#E0A245", "line-width": 1, "line-opacity": 0.6 } });

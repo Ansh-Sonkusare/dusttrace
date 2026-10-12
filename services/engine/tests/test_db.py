@@ -352,8 +352,9 @@ def test_real_housing_replaces_demo_housing_but_not_demo_schools(conn, settings,
     assert ("school", "seed") in kinds  # no OSM schools yet, so the demo ones stay
 
     # a refresh with fewer homes drops cells that no longer qualify
-    ward = [72.835, 19.09, 72.91, 19.14]
-    monkeypatch.setattr(ohsome, "area_by_cell", lambda cells, **k: {housing.in_box(cells, ward)[0]["id"]: 20_000.0})
+    from dusttrace.config import load_seed
+    ward = load_seed("K-East")["ward"]
+    monkeypatch.setattr(ohsome, "area_by_cell", lambda cells, **k: {housing.in_ward(cells, ward)[0]["id"]: 20_000.0})
     out2 = pipeline.load_housing_osm(conn, settings)
     assert out2["receptors"] == 1
     assert one(conn, "select count(*) from receptors where kind='housing' and source='osm'")[0] == 1
@@ -462,3 +463,69 @@ def test_an_insufficient_check_is_retried_when_the_feed_backfills(conn, settings
     out = pipeline.verify_actions(conn, "K-East", now + pd.Timedelta(hours=7))
     assert out["drop"] == 1
     assert one(conn, "select count(*), max(verdict) from verifications where action_id=%s", (aid,)) == (1, "drop")
+
+
+def test_a_station_belongs_to_the_nearer_ward_whoever_finds_it_first(conn, settings):
+    from dusttrace.config import load_seed
+    db.upsert_seed(conn, load_seed("P-North"))
+    malad = {"id": "openaq-77", "name": "Malad West", "source": "openaq", "lat": 19.1864, "lon": 72.8485}
+    db.upsert_station(conn, malad, "K-East")   # K-East's wide search finds it first
+    db.upsert_station(conn, malad, "P-North")
+    assert one(conn, "select ward_id from stations where id='openaq-77'")[0] == "P-North"
+    chakala = {"id": "openaq-78", "name": "Chakala", "source": "openaq", "lat": 19.1102, "lon": 72.8622}
+    db.upsert_station(conn, chakala, "K-East")
+    db.upsert_station(conn, chakala, "P-North")  # P-North's search reaching it doesn't take it
+    assert one(conn, "select ward_id from stations where id='openaq-78'")[0] == "K-East"
+    assert one(conn, "select boundary->>'type' from wards where id='P-North'")[0] == "Polygon"
+    # Order doesn't matter: Powai, found first (and only) by P-North's wider search, is still K-East's.
+    powai = {"id": "openaq-79", "name": "Powai", "source": "openaq", "lat": 19.1375, "lon": 72.9151}
+    db.upsert_station(conn, powai, "P-North")
+    assert one(conn, "select ward_id from stations where id='openaq-79'")[0] == "K-East"
+
+
+def test_p_north_runs_end_to_end_with_no_demo_sites(conn, settings):
+    import dataclasses
+    from dusttrace.config import load_seed
+    pn = dataclasses.replace(settings, ward_id="P-North")
+    db.upsert_seed(conn, load_seed("P-North"))
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    pipeline.ingest(conn, pn, mode="synthetic", days=60)
+    out = pipeline.run(conn, pn)
+    assert out["data_mode"] == "synthetic"
+    assert one(conn, "select ward_id from runs where id=%s", (out["run_id"],))[0] == "P-North"
+    assert one(conn, "select count(*) from safe_windows where run_id=%s", (out["run_id"],))[0] == 0  # no sites yet
+    k = pipeline.run(conn, settings)  # K-East is untouched by P-North's run
+    assert one(conn, "select count(distinct site_id) from safe_windows where run_id=%s", (k["run_id"],))[0] == 6
+
+
+def test_osm_sites_outside_the_ward_or_gone_from_osm_are_retired(conn, settings, monkeypatch):
+    from dusttrace.sources import ohsome
+    inside = {"id": "osm-way-1", "name": "Inside K/E", "activity": "excavation", "lat": 19.1172, "lon": 72.8561,
+              "area_m2": 9000, "source": "osm", "demo": False}
+    outside = {**inside, "id": "osm-way-2", "name": "Goregaon, P/S ward", "lat": 19.1689, "lon": 72.8427}
+    monkeypatch.setattr(pipeline, "fetch_osm_sites", lambda bbox: ([inside, outside], "ohsome"))
+    db.upsert_sites(conn, [outside], "K-East")  # loaded by an earlier, box-only pull
+    conn.commit()
+    assert pipeline.load_sites_osm(conn, settings) == 1
+    rows = dict(conn.execute("select id, active from sites where source='osm'").fetchall())
+    assert rows == {"osm-way-1": True, "osm-way-2": False}
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    out = pipeline.run(conn, settings)
+    planned = {r[0] for r in conn.execute("select distinct site_id from safe_windows where run_id=%s", (out["run_id"],))}
+    assert "osm-way-1" in planned and "osm-way-2" not in planned
+
+
+def test_two_wards_housing_does_not_collide(conn, settings, monkeypatch):
+    import dataclasses
+    from dusttrace.config import load_seed
+    from dusttrace.sources import ohsome
+    db.upsert_seed(conn, load_seed("P-North"))
+    monkeypatch.setattr(ohsome, "area_by_cell", lambda cells, **k: {c["id"]: 20_000.0 for c in cells})
+    k = pipeline.load_housing_osm(conn, settings)
+    p = pipeline.load_housing_osm(conn, dataclasses.replace(settings, ward_id="P-North"))
+    counts = dict(conn.execute("""select ward_id, count(*) from receptors where kind='housing' and source='osm'
+                                  group by ward_id""").fetchall())
+    assert counts == {"K-East": k["receptors"], "P-North": p["receptors"]}
+    # each ward's homes sit in its own box
+    lat = dict(conn.execute("select ward_id, avg(lat) from receptors where kind='housing' and source='osm' group by 1").fetchall())
+    assert float(lat["K-East"]) < 19.15 < float(lat["P-North"])

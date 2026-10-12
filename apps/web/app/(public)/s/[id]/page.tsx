@@ -18,7 +18,8 @@ export default async function PublicSitePage({ params, searchParams }: {
   params: Promise<{ id: string }>; searchParams: Promise<{ r?: string }>;
 }) {
   const [{ id }, { r }] = await Promise.all([params, searchParams]);
-  const [site, run, ward] = await Promise.all([getSite(id), getLatestRun(), getWard()]);
+  const site = await getSite(id);
+  const [run, ward] = await Promise.all([getLatestRun(site?.ward_id), getWard(site?.ward_id)]);
   if (!site) notFound();
   const [scores, windows] = run ? await Promise.all([getDustScores(run.id, id), getWindows(run.id, id)]) : [[], []];
   const s = scores[0];

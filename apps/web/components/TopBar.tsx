@@ -1,5 +1,6 @@
 import type { Run, Ward } from "@/lib/queries";
 import { dayHour } from "@/lib/format";
+import { WARDS } from "@/lib/wards";
 
 const MODE: Record<Run["data_mode"], { cls: string; label: string }> = {
   live: { cls: "go", label: "Live data" },
@@ -11,7 +12,12 @@ const MODE: Record<Run["data_mode"], { cls: string; label: string }> = {
 export default function TopBar({ ward, run }: { ward: Ward | null; run: Run | null }) {
   return (
     <header className="top">
-      <b>{ward?.name ?? "No ward loaded"}</b>
+      {/* Ward switcher: "?ward=" keeps the current page and is remembered in a cookie (proxy.ts). */}
+      <nav className="wards" aria-label="Ward">
+        {WARDS.map((w) => (
+          <a key={w.id} href={`?ward=${w.id}`} aria-current={ward?.id === w.id ? "page" : undefined}>{w.name}</a>
+        ))}
+      </nav>
       <div className="sp" />
       {run ? (
         <>
