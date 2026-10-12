@@ -97,3 +97,18 @@ def test_run_audits_every_site_sensor(conn, settings):
     assert one(conn, "select bool_and(synthetic), count(*) > 0 from site_readings") == (True, True)
     bench = out["metrics"]["audit"]
     assert bench["precision"] >= 0.9 and bench["recall"] >= 0.85
+
+
+def test_run_ranks_every_site_for_inspection(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    out = pipeline.run(conn, settings)
+    rows = conn.execute("""select site_id, rank, score, components, reasons from inspection_rank
+                            where run_id=%s order by rank""", (out["run_id"],)).fetchall()
+    assert [r[1] for r in rows] == [1, 2, 3, 4, 5, 6]
+    assert sorted(r[0] for r in rows) == list("ABCDEF")
+    assert all(r[4] for r in rows)  # every site says why
+    scores = [r[2] for r in rows]
+    assert scores == sorted(scores, reverse=True)
+    by_site = {r[0]: r for r in rows}
+    assert by_site["D"][3]["unsensored"] > 0 and by_site["A"][3]["unsensored"] == 0
+    assert by_site["C"][3]["trust"] > by_site["A"][3]["trust"]  # C's monitor is untrusted

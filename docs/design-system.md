@@ -67,6 +67,7 @@ Writing rules: sentence case everywhere. No all-caps eyebrows, no labels stacked
 | `.item` list | 4 px status bar on the left, bold head, muted reason |
 | `.banner` | Amber outline on dust tint, for honesty notices (synthetic data) |
 | `.pill` | Status or mode chip; tinted fill + coloured border |
+| `.meter` | Priority score as segments, one per component; upwind is the one amber segment, the rest are greys, with a key below |
 | `TrustPill` | Sensor trust score and band: Trusted (go), Check (caution), Untrusted (avoid); "No sensor" plain |
 
 ## Charts

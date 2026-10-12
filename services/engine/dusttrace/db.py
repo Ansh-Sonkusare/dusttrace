@@ -212,3 +212,18 @@ def write_audits(conn, run_id: int, results) -> None:
                values (%s,%s,%s,%s,%s,%s,%s)""",
             [(run_id, a.sensor_id, a.site_id, a.score, a.band, json.dumps(a.checks), a.reasons) for a in results],
         )
+
+
+def site_signals(conn, ward_id: str) -> dict:
+    """Citizen reports and confirmed violations per site, for the priority score. Empty until those
+    tables exist (issues #7, #8)."""
+    return {}
+
+
+def write_ranking(conn, run_id: int, ranked) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into inspection_rank (run_id, site_id, rank, score, components, reasons)
+               values (%s,%s,%s,%s,%s,%s)""",
+            [(run_id, r.site_id, r.rank, r.score, json.dumps(r.components), r.reasons) for r in ranked],
+        )
