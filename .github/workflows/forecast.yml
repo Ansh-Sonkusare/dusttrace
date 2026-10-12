@@ -47,9 +47,10 @@ jobs:
           cache: pip
       - if: steps.gate.outputs.ok == 'true'
         run: pip install -e .
-      - name: Apply migrations
+      - name: Apply migrations and the seed
         if: steps.gate.outputs.ok == 'true'
-        run: python -m dusttrace init-db
+        # The seed is an upsert, so new demo entries (like the site sensors) reach the database too.
+        run: python -m dusttrace init-db && python -m dusttrace seed
       - name: Ingest
         if: steps.gate.outputs.ok == 'true'
         run: python -m dusttrace ingest --mode "${{ inputs.mode || 'auto' }}" --days "${{ inputs.days || '3' }}"
