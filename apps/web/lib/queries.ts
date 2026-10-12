@@ -288,3 +288,17 @@ export async function getLatestBacktest(): Promise<Backtest | null> {
        from backtests where ward_id=$1 order by created_at desc limit 1`, [WARD]);
   return r[0] ? { ...r[0], created_at: iso(r[0].created_at), train_end: iso(r[0].train_end), test_end: iso(r[0].test_end) } : null;
 }
+
+export interface Candidate { id: number; lat: number; lon: number; area_m2: number; site_id: string | null; scene_before: string; scene_after: string; found_at: string }
+
+// Sentinel-2 change (F2): candidates not on the site list, largest first.
+export async function getCandidates(limit = 8): Promise<{ unmatched: Candidate[]; matched: string[]; total: number }> {
+  const rows = await q<Candidate>(
+    `select id, lat, lon, area_m2, site_id, scene_before, scene_after, found_at from site_candidates
+      where ward_id=$1 and status <> 'rejected' order by area_m2 desc`, [WARD]);
+  return {
+    unmatched: rows.filter((r) => !r.site_id).slice(0, limit),
+    matched: [...new Set(rows.filter((r) => r.site_id).map((r) => r.site_id as string))].sort(),
+    total: rows.length,
+  };
+}

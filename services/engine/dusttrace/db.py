@@ -222,10 +222,12 @@ def site_signals(conn, ward_id: str) -> dict:
             (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > now() - interval '7 days'),
             (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > now() - interval '90 days'),
             (select count(*) from citizen_reports c where c.site_id=s.id and c.status <> 'rejected' and c.at > now() - interval '7 days'),
-            (select count(*) from citizen_reports c where c.site_id=s.id and c.status = 'verified' and c.at > now() - interval '30 days')
+            (select count(*) from citizen_reports c where c.site_id=s.id and c.status = 'verified' and c.at > now() - interval '30 days'),
+            exists (select 1 from site_candidates k where k.site_id=s.id and k.status <> 'rejected'
+                      and k.found_at > now() - interval '120 days')
           from sites s where s.ward_id=%s""", (ward_id,)).fetchall()
     return {r[0]: {"reports": int(r[4]), "verified_reports": int(r[5]), "violations": int(r[1]),
-                   "violations_90d": int(r[3]), "confirmed_violation": r[2] > 0} for r in rows}
+                   "violations_90d": int(r[3]), "confirmed_violation": r[2] > 0, "satellite": bool(r[6])} for r in rows}
 
 
 def write_ranking(conn, run_id: int, ranked) -> None:
@@ -314,3 +316,16 @@ def windows_followed(conn, ward_id: str) -> dict:
         select a.site_id, count(*), count(x.d) from avoid_days a
           left join accepted x on x.site_id = a.site_id and x.d = a.d group by a.site_id""", (ward_id,)).fetchall()
     return {r[0]: round(r[2] / r[1], 3) for r in rows}
+
+
+def write_candidates(conn, ward_id: str, before: str, after: str, cands: list[dict]) -> int:
+    """Replace the ward's unverified candidates with this scene pair's; confirmed or rejected ones stay."""
+    conn.execute("delete from site_candidates where ward_id=%s and status='unverified'", (ward_id,))
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into site_candidates (ward_id, scene_before, scene_after, lat, lon, area_m2, site_id)
+               values (%s,%s,%s,%s,%s,%s,%s)""",
+            [(ward_id, before, after, c["lat"], c["lon"], c["area_m2"], c.get("site_id")) for c in cands],
+        )
+    conn.commit()
+    return len(cands)
