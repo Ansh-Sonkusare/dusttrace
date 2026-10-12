@@ -26,20 +26,22 @@ def band(score: float) -> str:
 
 
 def compute(trust: float | None, has_sensor: bool, spike_hours: int, windows_followed: float | None,
-            verified_reports: int, violations: int) -> Score:
+            verified_reports: int, violations: int, sensor_known: bool = True) -> Score:
     """`spike_hours`: likely-spike hours the site sits upwind of a station (attribution).
     `windows_followed`: share of Avoid windows the site accepted a plan for, or None if unknown.
     `verified_reports`: officer-verified citizen reports, 30 days. `violations`: confirmed, 90 days."""
     notes = []
     parts = {
-        "trust": (trust or 0) / 100 if has_sensor else 0.0,
+        "trust": (trust or 0) / 100 if has_sensor else (0.0 if sensor_known else 0.5),
         "spikes": 1 - min(spike_hours / 6, 1),
         "windows": 0.5 if windows_followed is None else max(0.0, min(windows_followed, 1.0)),
         "reports": 1 - min(verified_reports / 3, 1),
         "inspections": 1 - min(violations / 2, 1),
     }
-    if not has_sensor:
+    if not has_sensor and sensor_known:
         notes.append("No dust monitor, so the trust share is lost.")
+    if not has_sensor and not sensor_known:
+        notes.append("Its BMC monitor feed is not connected to DustTrace yet, so the trust share counts as half.")
     if windows_followed is None:
         notes.append("Safe-Work Windows followed: not reported yet, counted as half.")
     points = {k: round(WEIGHTS[k] * v, 1) for k, v in parts.items()}

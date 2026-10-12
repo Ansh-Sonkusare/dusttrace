@@ -128,3 +128,11 @@ def test_d6_satellite_change_is_a_second_signal_for_an_unsensored_site():
     acts = actions(d)
     assert "satellite change" in d.signals
     assert acts["REGISTER_UNSENSORED_SITE"].rule == "D6" and "REQUEST_SPOT_CHECK" not in acts
+
+
+def test_a_site_whose_feed_is_not_connected_is_not_treated_as_unmonitored():
+    d = agent.decide(ctx(site_id="osm-way-1", has_sensor=False, sensor_known=False, has_relay=False, trust=None))
+    assert d is None  # nothing triggers: unknown is not "no monitor"
+    d = agent.decide(ctx(site_id="osm-way-1", has_sensor=False, sensor_known=False, has_relay=False, trust=None,
+                         sensitive_avoid=[(SPIKE[0], "School")]))
+    assert "unsensored_site" not in d.triggers and "site registry" not in d.signals

@@ -2,6 +2,8 @@ import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import NoRun from "@/components/Empty";
 import { getCandidates, getLatestRun, getRanking, getWard } from "@/lib/queries";
+import { decideCandidate } from "@/lib/actions";
+import { sourceLabel } from "@/lib/sites";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +47,7 @@ export default async function InspectPage() {
                         <div className="hd">
                           <b className="tab">{r.rank}</b>
                           <b>{r.site_id} · {r.name}</b>
-                          {r.demo && <span className="pill">Demo</span>}
+                          {sourceLabel(r) && <span className="pill">{sourceLabel(r)}</span>}
                           <span className="tab" style={{ marginLeft: "auto" }}>{Math.round(r.score)} {Math.round(r.score) === 1 ? "point" : "points"}</span>
                         </div>
                         <div className="meter" aria-hidden="true">
@@ -71,16 +73,23 @@ export default async function InspectPage() {
             <div className="pb">
               <p className="small muted" style={{ marginTop: 0 }}>
                 Ground that turned from green to bare soil over the year. {sat.matched.length > 0 && <>Near known sites {sat.matched.join(", ")}, which confirms they are active (a second signal for the agent). </>}
-                The largest patches not on the site list are below. They are unverified: some will be roads, fields drying out or finished buildings, so look before acting.
+                The largest patches not on the site list are below. They are unverified: some will be roads, fields drying out or finished buildings, so look before acting. Confirming one adds it to the site list; the next run gives it Safe-Work Windows.
               </p>
               <table className="tbl">
-                <thead><tr><th>Where</th><th>Changed area</th><th></th></tr></thead>
+                <thead><tr><th>Where</th><th>Changed area</th><th></th><th></th></tr></thead>
                 <tbody>
                   {sat.unmatched.map((c) => (
                     <tr key={c.id}>
                       <td className="tab">{c.lat.toFixed(4)}, {c.lon.toFixed(4)}</td>
                       <td className="tab">{Math.round(c.area_m2 / 100) / 100} ha</td>
                       <td><a href={`https://www.google.com/maps/@${c.lat},${c.lon},300m/data=!3m1!1e3`} target="_blank" rel="noreferrer">Satellite view</a></td>
+                      <td>
+                        <form action={decideCandidate} className="decide">
+                          <input type="hidden" name="id" value={c.id} />
+                          <button className="btn" name="verdict" value="confirmed" title="Add it to the site list; the next run plans windows for it">Confirm site</button>
+                          <button className="btn" name="verdict" value="rejected" title="Not construction: hide it">Reject</button>
+                        </form>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

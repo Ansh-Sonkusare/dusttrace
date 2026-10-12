@@ -286,3 +286,26 @@ def test_long_dead_station_is_not_revived(conn, settings):
     _real_with_cams(conn, stale_hours=24 * 40)
     out = pipeline.run(conn, settings)
     assert "openaq-7" not in out["stations"] and out["metrics"]["filled"]["stations"] == 0
+
+
+def test_real_osm_sites_join_the_run_without_false_d6(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    db.upsert_sites(conn, [{"id": "osm-way-101", "name": "Metro works", "activity": "excavation", "lat": 19.1172,
+                            "lon": 72.8561, "area_m2": 9000, "source": "osm", "demo": False}], "K-East")
+    conn.commit()
+    out = pipeline.run(conn, settings)
+    assert one(conn, "select count(*) from safe_windows where run_id=%s and site_id='osm-way-101'", (out["run_id"],))[0] == 48
+    assert one(conn, "select components->>'unsensored' from inspection_rank where run_id=%s and site_id='osm-way-101'",
+               (out["run_id"],))[0] in ("0", "0.0")
+    acts = _case_actions(conn, "osm-way-101")
+    assert ("REGISTER_UNSENSORED_SITE", "D6") not in acts and ("REQUEST_SPOT_CHECK", "D1") not in acts
+
+
+def test_demo_sites_can_be_switched_off(conn, settings, monkeypatch):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    db.upsert_sites(conn, [{"id": "osm-way-101", "name": "Metro works", "activity": "excavation", "lat": 19.1172,
+                            "lon": 72.8561, "area_m2": 9000, "source": "osm", "demo": False}], "K-East")
+    conn.commit()
+    monkeypatch.setenv("DUSTTRACE_DEMO_SITES", "0")
+    out = pipeline.run(conn, settings)
+    assert [r[0] for r in conn.execute("select distinct site_id from safe_windows where run_id=%s", (out["run_id"],))] == ["osm-way-101"]

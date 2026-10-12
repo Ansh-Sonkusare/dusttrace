@@ -36,3 +36,8 @@ def test_bad_behaviour_drives_the_score_down_and_is_bounded():
 def test_bands():
     assert dust_score.band(80) == "good" and dust_score.band(79.9) == "fair"
     assert dust_score.band(40) == "fair" and dust_score.band(39.9) == "poor"
+
+
+def test_unconnected_feed_counts_half_and_says_so():
+    s = score(has_sensor=False, sensor_known=False, windows_followed=1.0)
+    assert s.components["trust"] == 15 and any("not connected" in n for n in s.notes)

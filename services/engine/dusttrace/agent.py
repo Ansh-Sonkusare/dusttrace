@@ -69,6 +69,7 @@ class SiteContext:
     confirmed_violation: bool = False  # an officer confirmed a violation (inspection outcome)
     non_construction: bool = False     # evidence points to a non-construction source
     satellite_active: bool = False     # Sentinel-2 shows new bare ground at the site (F2)
+    sensor_known: bool = True          # False when the site's BMC feed isn't connected: unknown is not "none"
     pending_requests: list = field(default_factory=list)  # {"action", "deadline"} not yet answered
 
 
@@ -153,7 +154,7 @@ def signals(c: SiteContext) -> list[str]:
         s.append("officer inspection")
     if c.satellite_active:
         s.append("satellite change")
-    if not c.has_sensor:
+    if not c.has_sensor and c.sensor_known:
         s.append("site registry")
     return s
 
@@ -169,7 +170,7 @@ def decide(c: SiteContext) -> Decision | None:
         triggers.append("site_exceedance")
     if c.has_sensor and c.trust is not None and c.trust < 40:
         triggers.append("sensor_audit")
-    if not c.has_sensor:
+    if not c.has_sensor and c.sensor_known:
         triggers.append("unsensored_site")
     if c.exceedances_7d >= 3 or c.ignored_windows >= 2:
         triggers.append("repeat_exceedance")
@@ -208,7 +209,7 @@ def decide(c: SiteContext) -> Decision | None:
     if "sensor_audit" in triggers:  # D5: the basis is the multi-check audit, not a dust cause
         acts.append(_act("FLAG_SENSOR_FOR_AUDIT", f"D5: monitor trust {round(c.trust)}/100; its readings can't clear the site."))
         acts.append(_act("ADD_TO_INSPECTION", f"D5: monitor trust {round(c.trust)}/100.", rule="D5"))
-    if not c.has_sensor:  # D6
+    if not c.has_sensor and c.sensor_known:  # D6
         acts.append(_act("REGISTER_UNSENSORED_SITE", "D6: active site with no dust monitor."))
         acts.append(_act("ADD_TO_INSPECTION", "D6: active site with no dust monitor.", rule="D6"))
     repeat = c.exceedances_7d >= 3 or c.ignored_windows >= 2

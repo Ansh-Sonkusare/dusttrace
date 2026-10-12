@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { q } from "./db";
 import { parseOutcome } from "./officer";
 import { planSecret, verifySite } from "./plan";
+import { candidateSite, parseCandidateVerdict } from "./sites";
 
 // An officer approves or declines an action the policy engine proposed (route L1 or L2).
 // Only proposed actions can be decided; everything else the engine set stays as it is.
@@ -54,4 +55,29 @@ export async function acceptPlan(form: FormData): Promise<void> {
     [siteId],
   );
   revalidatePath(`/plan/${siteId}`);
+}
+
+// An officer confirms or rejects a satellite candidate (F2). A confirmed one becomes a real site
+// (not demo) whose monitor feed isn't connected; the next engine run plans its Safe-Work Windows.
+export async function decideCandidate(form: FormData): Promise<void> {
+  const parsed = parseCandidateVerdict(form);
+  if (!parsed.ok) return;
+  const { id, verdict } = parsed.value;
+  const rows = await q<{ id: number; ward_id: string; lat: number; lon: number; area_m2: number }>(
+    "select id, ward_id, lat, lon, area_m2 from site_candidates where id=$1 and status='unverified' and site_id is null", [id]);
+  const c = rows[0];
+  if (!c) return;
+  if (verdict === "confirmed") {
+    const s = candidateSite(c);
+    await q(
+      `insert into sites (id, name, activity, lat, lon, ward_id, area_m2, sensor_status, demo, source)
+       values ($1, $2, $3, $4, $5, $6, $7, 'not_connected', false, 'satellite') on conflict (id) do nothing`,
+      [s.id, s.name, s.activity, s.lat, s.lon, c.ward_id, s.area_m2],
+    );
+    await q("update site_candidates set status='confirmed', site_id=$2 where id=$1", [id, s.id]);
+  } else {
+    await q("update site_candidates set status='rejected' where id=$1", [id]);
+  }
+  revalidatePath("/inspect");
+  revalidatePath("/sites");
 }

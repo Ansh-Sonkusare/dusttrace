@@ -238,3 +238,14 @@ def test_forecast_beats_persistence_on_synthetic_year():
     assert len(ward) == 24
     assert (ward["pm10_lo"] <= ward["pm10"]).all() and (ward["pm10"] <= ward["pm10_hi"]).all()
     assert ward["p_exceed"].between(0, 1).all()
+
+
+def test_overpass_construction_sites():
+    sites = overpass.parse_sites(load("overpass_construction.json"))
+    by = {s["id"]: s for s in sites}
+    assert set(by) == {"osm-way-101", "osm-way-102", "osm-relation-104"}  # too small and too large are dropped
+    assert by["osm-way-101"]["activity"] == "excavation" and by["osm-way-101"]["name"].startswith("Metro Line 7A")
+    assert by["osm-relation-104"]["activity"] == "demolition"
+    assert by["osm-way-102"]["activity"] == "structure" and by["osm-way-102"]["name"].startswith("Construction site")
+    assert 2000 < by["osm-way-101"]["area_m2"] < 40000
+    assert all(s["source"] == "osm" and s["demo"] is False for s in sites)
