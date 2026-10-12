@@ -1,0 +1,539 @@
+{
+ "attribution": {
+  "url": "https://ohsome.org/copyrights",
+  "text": "\u00a9 OpenStreetMap contributors"
+ },
+ "apiVersion": "1.10.4",
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.886665,
+       19.0950284
+      ],
+      [
+       72.8868214,
+       19.0950284
+      ],
+      [
+       72.8868214,
+       19.0953423
+      ],
+      [
+       72.886665,
+       19.0953423
+      ],
+      [
+       72.886665,
+       19.0950284
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/345152623",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "addr:city": "mumbai",
+    "addr:postcode": "400072",
+    "addr:street": "Yogiraj street",
+    "amenity": "school",
+    "name": "Y.s.k Vidyalaya",
+    "operator": "Yadav Sangh Mumbai"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8818513,
+       19.0809387
+      ],
+      [
+       72.8820782,
+       19.0809387
+      ],
+      [
+       72.8820782,
+       19.0811435
+      ],
+      [
+       72.8818513,
+       19.0811435
+      ],
+      [
+       72.8818513,
+       19.0809387
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/353174274",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "addr:city": "mumbai",
+    "addr:district": "Mumbai",
+    "addr:full": "Sagar Palace B Wing, Sonapur Lane, F.P.P. Marg, Off L B S Marg, Kurla (W)",
+    "addr:postcode": "400070",
+    "addr:state": "Maharashtra",
+    "addr:street": "father peter periera road",
+    "amenity": "hospital",
+    "building": "yes",
+    "building:levels": "4",
+    "healthcare": "hospital",
+    "name": "City Hospital and Reserch Centre",
+    "source": "OpenGovernmentData"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8371118,
+       19.1035291
+      ],
+      [
+       72.8376023,
+       19.1035291
+      ],
+      [
+       72.8376023,
+       19.1039093
+      ],
+      [
+       72.8371118,
+       19.1039093
+      ],
+      [
+       72.8371118,
+       19.1035291
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/79670766",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "amenity": "college",
+    "building": "school",
+    "name": "Narsee Monjee College of Commerce"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8488129,
+       19.103623
+      ],
+      [
+       72.8489738,
+       19.103623
+      ],
+      [
+       72.8489738,
+       19.1037847
+      ],
+      [
+       72.8488129,
+       19.1037847
+      ],
+      [
+       72.8488129,
+       19.103623
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/144524310",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "amenity": "school",
+    "building": "school"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8384747,
+       19.0835527
+      ],
+      [
+       72.8384747,
+       19.0835527
+      ],
+      [
+       72.8384747,
+       19.0835527
+      ],
+      [
+       72.8384747,
+       19.0835527
+      ],
+      [
+       72.8384747,
+       19.0835527
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "node/245668712",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "amenity": "school",
+    "name": "Classic",
+    "opening_hours": "Mo-Su 09:00-21:00",
+    "source": "AND",
+    "tourism": "hotel"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.9157388,
+       19.1317025
+      ],
+      [
+       72.9157388,
+       19.1317025
+      ],
+      [
+       72.9157388,
+       19.1317025
+      ],
+      [
+       72.9157388,
+       19.1317025
+      ],
+      [
+       72.9157388,
+       19.1317025
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "node/668494244",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "alt_name": "SOM & IRCC",
+    "amenity": "college",
+    "name": "Shailesh J Mehta Institute of Management",
+    "toilets:wheelchair": "no",
+    "wheelchair": "limited"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8402279,
+       19.08
+      ],
+      [
+       72.8402845,
+       19.08
+      ],
+      [
+       72.8402845,
+       19.0800196
+      ],
+      [
+       72.8402279,
+       19.0800196
+      ],
+      [
+       72.8402279,
+       19.08
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/353418036",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "amenity": "hospital",
+    "healthcare": "hospital"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8522706,
+       19.1103536
+      ],
+      [
+       72.8522706,
+       19.1103536
+      ],
+      [
+       72.8522706,
+       19.1103536
+      ],
+      [
+       72.8522706,
+       19.1103536
+      ],
+      [
+       72.8522706,
+       19.1103536
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "node/1345329154",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "amenity": "kindergarten",
+    "name": "Little Feet"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8483274,
+       19.1106501
+      ],
+      [
+       72.8483274,
+       19.1106501
+      ],
+      [
+       72.8483274,
+       19.1106501
+      ],
+      [
+       72.8483274,
+       19.1106501
+      ],
+      [
+       72.8483274,
+       19.1106501
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "node/1347550460",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "amenity": "hospital",
+    "healthcare": "hospital",
+    "name": "Jevan Vikas Hospital"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8628859,
+       19.1421361
+      ],
+      [
+       72.8628859,
+       19.1421361
+      ],
+      [
+       72.8628859,
+       19.1421361
+      ],
+      [
+       72.8628859,
+       19.1421361
+      ],
+      [
+       72.8628859,
+       19.1421361
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "node/1640883979",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "amenity": "college"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.9091814,
+       19.0867981
+      ],
+      [
+       72.9101765,
+       19.0867981
+      ],
+      [
+       72.9101765,
+       19.0877841
+      ],
+      [
+       72.9091814,
+       19.0877841
+      ],
+      [
+       72.9091814,
+       19.0867981
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "way/1123859440",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "amenity": "college",
+    "name:en": "Ramniranjan Jhunjhunwala College"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8446354,
+       19.0923132
+      ],
+      [
+       72.8446354,
+       19.0923132
+      ],
+      [
+       72.8446354,
+       19.0923132
+      ],
+      [
+       72.8446354,
+       19.0923132
+      ],
+      [
+       72.8446354,
+       19.0923132
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "node/4529961390",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "amenity": "school",
+    "name:en": "Addonics Solutions Pvt. Ltd, Vile Parle, Mumbai"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.8366102,
+       19.1372375
+      ],
+      [
+       72.8366102,
+       19.1372375
+      ],
+      [
+       72.8366102,
+       19.1372375
+      ],
+      [
+       72.8366102,
+       19.1372375
+      ],
+      [
+       72.8366102,
+       19.1372375
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "node/5201099224",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "addr:street": "Hanuman Mandir road",
+    "amenity": "hospital",
+    "healthcare": "hospital",
+    "name:en": "R G Stone"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       72.9078433,
+       19.1152614
+      ],
+      [
+       72.9078433,
+       19.1152614
+      ],
+      [
+       72.9078433,
+       19.1152614
+      ],
+      [
+       72.9078433,
+       19.1152614
+      ],
+      [
+       72.9078433,
+       19.1152614
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "@osmId": "node/6795476290",
+    "@snapshotTimestamp": "2026-07-27T09:00:00Z",
+    "addr:street": "Central Avenue",
+    "amenity": "kindergarten",
+    "name:en": "Eurokids",
+    "phone": "+919324020701"
+   }
+  }
+ ]
+}

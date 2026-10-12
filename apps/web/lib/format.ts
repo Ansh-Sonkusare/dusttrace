@@ -55,6 +55,8 @@ export const ACTION_LABEL: Record<string, string> = {
   NOTIFY_RESIDENTS: "Notify residents",
   TRIGGER_MIST_NOW: "Mist now",
   PAUSE_DUSTY_TASK: "Pause dusty work",
+  ORDER_COVER_DEBRIS: "Cover debris with green net",
+  ORDER_WHEEL_WASH: "Wheel wash and covered loads",
   REQUEST_SITE_PHOTO: "Ask the site for a photo",
   REQUEST_SPOT_CHECK: "Officer spot check",
   FLAG_SENSOR_FOR_AUDIT: "Flag the monitor for audit",

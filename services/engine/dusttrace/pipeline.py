@@ -12,7 +12,7 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 
 from . import agent, alerts, attribution, audit, backtest as bt, db, dust_score, fill, forecast, windows
-from . import housing, verify as verify_mod
+from . import housing, signature, verify as verify_mod
 from .config import Settings, load_seed
 from .sources import cams, ohsome, openaq, openmeteo, overpass, synthetic
 
@@ -135,9 +135,22 @@ def receptor_bbox(ward_bbox: list[float], margin_deg: float = 0.01) -> list[floa
     return _expand(ward_bbox, margin_deg)
 
 
+def fetch_osm_receptors(bbox: list[float]) -> tuple[list[dict], str]:
+    """Schools and hospitals from Overpass, or from the ohsome snapshot when it fails or comes back empty."""
+    try:
+        recs = overpass.fetch(bbox)
+        if recs:
+            return recs, "overpass"
+        log.warning("Overpass returned no schools or hospitals; checking the ohsome snapshot")
+    except (httpx.HTTPError, ValueError) as e:
+        log.warning("Overpass unavailable (%s); using the ohsome snapshot", e)
+    return ohsome.fetch_receptors(bbox), "ohsome"
+
+
 def load_receptors_osm(conn, settings: Settings) -> int:
     seed = load_seed()
-    recs = overpass.fetch(receptor_bbox(seed["ward"]["bbox"]))
+    recs, source = fetch_osm_receptors(receptor_bbox(seed["ward"]["bbox"]))
+    log.info("%d schools and hospitals from %s", len(recs), source)
     db.upsert_receptors(conn, recs, seed["ward"]["id"])
     conn.commit()
     return len(recs)
@@ -190,13 +203,14 @@ def run(conn, settings: Settings) -> dict:
     """Train, forecast 48 h, model plumes and issue Safe-Work Windows. Writes one `runs` row."""
     ward_id = settings.ward_id
     wx = db.read_frame(conn, "select ts, wind_speed, wind_dir, blh, temp, rh, precip, synthetic from weather_hourly where ward_id=%s order by ts", (ward_id,))
-    rd = db.read_frame(conn, """select r.station_id, r.ts, r.pm10, r.synthetic from readings r
+    rd = db.read_frame(conn, """select r.station_id, r.ts, r.pm10, r.pm25, r.synthetic from readings r
                                 join stations s on s.id = r.station_id where s.ward_id=%s order by r.ts""", (ward_id,))
     if wx.empty or rd.empty:
         raise RuntimeError("No weather or readings yet. Run `dusttrace ingest` first.")
     for c in ["wind_speed", "wind_dir", "blh", "temp", "rh", "precip"]:
         wx[c] = wx[c].astype(float)
     rd["pm10"] = rd["pm10"].astype(float)
+    rd["pm25"] = rd["pm25"].astype(float)
     wx["ts"] = pd.to_datetime(wx["ts"], utc=True)
     rd["ts"] = pd.to_datetime(rd["ts"], utc=True)
 
@@ -207,6 +221,7 @@ def run(conn, settings: Settings) -> dict:
     if not filled.empty:
         rd = pd.concat([rd, filled], ignore_index=True)
     t0, active = anchor(rd, now_hour())
+    sigs = station_signatures(conn, ward_id, rd, t0)  # from measured hours only, before the station filter
     rd = rd[rd["station_id"].isin(active)]
 
     # Train on measured hours only; filled hours only let the forecast start from now.
@@ -222,7 +237,8 @@ def run(conn, settings: Settings) -> dict:
     fill_info["stations"] = int(used["station_id"].nunique())
     fill_info["hours"] = int(used.groupby("station_id").size().max()) if len(used) else 0
     metrics = {**model.metrics, "stations": list(active), "audit": bench, "newest_real_reading": newest_real,
-               "filled": fill_info, "inputs": verify_mod.input_shares(rd, t0)}
+               "filled": fill_info, "inputs": verify_mod.input_shares(rd, t0),
+               "signatures": {k: {x: v[x] for x in ("signature", "pm10", "ratio", "base_ratio", "ts")} for k, v in sigs.items()}}
     run_id = db.create_run(conn, ward_id, t0.to_pydatetime(), data_mode, "lightgbm-direct-v1", metrics)
     db.write_forecasts(conn, run_id, fc)
     db.write_audits(conn, run_id, audits)
@@ -239,7 +255,10 @@ def run(conn, settings: Settings) -> dict:
     db.write_ranking(conn, run_id, ranked)
     known = sites.set_index("id")["sensor_known"].to_dict()
     db.write_dust_scores(conn, run_id, score_sites(conn, ward_id, ranked, audits, known))
-    states = respond(conn, ward_id, run_id, now_hour(), hours, recs, ward_fc, audits, hot, sites)
+    windy = signature.dry_windy_hours(wx, t0, settings.horizon_hours)
+    metrics_extra = {"dry_windy_hours": len(windy)}
+    states = respond(conn, ward_id, run_id, now_hour(), hours, recs, ward_fc, audits, hot, sites, sigs, windy)
+    conn.execute("update runs set metrics = metrics || %s where id=%s", (Jsonb(metrics_extra), run_id))
     db.write_alerts(conn, run_id, alerts.derive(states))
     conn.commit()
 
@@ -302,12 +321,13 @@ def audit_sensors(conn, ward_id: str, rd: pd.DataFrame, wx: pd.DataFrame, t0: pd
 
 
 def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.DataFrame,
-            ward_p: pd.Series, audits, hot: dict, run_sites: pd.DataFrame | None = None) -> dict:
+            ward_p: pd.Series, audits, hot: dict, run_sites: pd.DataFrame | None = None,
+            sigs: dict | None = None, dry_windy: list | None = None) -> dict:
     """Dust Response Agent (F12): build each site's context from this run, let the policy engine
     decide, and update the site's open case. Returns each site's state for the ward alerts (F11)."""
     names = recs.set_index("id")["name"].to_dict()
     kinds = recs.set_index("id")["kind"].to_dict()
-    sites = db.read_frame(conn, """select s.id, s.name, s.activity, n.id is not null as has_sensor,
+    sites = db.read_frame(conn, """select s.id, s.name, s.activity, s.lat, s.lon, n.id is not null as has_sensor,
                                           coalesce(n.has_relay, false) as has_relay
                                      from sites s left join site_sensors n on n.site_id = s.id
                                     where s.ward_id=%s order by s.id""", (ward_id,))
@@ -324,10 +344,14 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
         # Only hours when dusty work is allowed (06:00-22:00 IST) can need a site to act.
         mine = [h for h in hours if h.site_id == s.id and 6 <= plume_hour(h.ts) < 22]
         spikes = [h for h in mine if float(ward_p.get(h.ts, 0.0)) >= 0.6 and h.exposures]
+        sig = signature.for_site(float(s.lat), float(s.lon), sigs or {})  # nearest real station's PM signature
         ctx = agent.SiteContext(
             site_id=s.id, name=s.name, activity=s.activity, has_sensor=bool(s.has_sensor),
             has_relay=bool(s.has_relay), trust=trust.get(s.id), now=now,
             sensor_known=bool(known.get(s.id, True)),
+            pm_signature=sig["signature"] if sig else None,
+            pm_station=sig["name"] if sig else None,
+            dry_windy_hours=list(dry_windy or []),
             spike_hours=[h.ts for h in spikes],
             spike_receptors=_unique(names[r] for h in spikes for r, _ in h.exposures),
             sensitive_avoid=_unique_pairs((h.ts, names[r]) for h in mine if h.status == "avoid" and h.sensitive_hit
@@ -403,6 +427,18 @@ def verify(conn, settings: Settings) -> dict:
     conn.commit()
     return {"run_id": run_id, "ok": ok, "shares": shares, "stations": stations, "cams": cams, "problems": probs,
             **sources}
+
+
+def station_signatures(conn, ward_id: str, rd: pd.DataFrame, t0: pd.Timestamp) -> dict:
+    """PM10/PM2.5 signature (F10) per real station, with its name and position for matching sites."""
+    sigs = signature.station_signatures(rd, t0)
+    if not sigs:
+        return {}
+    st = db.read_frame(conn, "select id, name, lat, lon from stations where ward_id=%s and id = any(%s)",
+                       (ward_id, list(sigs)))
+    for r in st.itertuples():
+        sigs[r.id].update({"name": r.name, "lat": float(r.lat), "lon": float(r.lon)})
+    return {k: v for k, v in sigs.items() if "lat" in v}
 
 
 def fill_from_cams(conn, ward_id: str, rd: pd.DataFrame, now: pd.Timestamp) -> tuple[pd.DataFrame, dict]:

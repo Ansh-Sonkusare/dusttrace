@@ -24,6 +24,8 @@ CATALOG: dict[str, tuple[str, tuple[str, ...], str]] = {
     "NOTIFY_RESIDENTS": ("preventive", ("auto",), "D3"),
     "TRIGGER_MIST_NOW": ("corrective", ("auto", "site"), "D4"),
     "PAUSE_DUSTY_TASK": ("corrective", ("site",), "D4"),
+    "ORDER_COVER_DEBRIS": ("corrective", ("site",), "F10"),
+    "ORDER_WHEEL_WASH": ("corrective", ("site",), "F10"),
     "REQUEST_SITE_PHOTO": ("evidence", ("site",), "D1"),
     "REQUEST_SPOT_CHECK": ("evidence", ("L1",), "D1"),
     "FLAG_SENSOR_FOR_AUDIT": ("enforcement", ("auto",), "D5"),
@@ -37,6 +39,8 @@ CATALOG: dict[str, tuple[str, tuple[str, ...], str]] = {
 ENFORCEMENT_FROM_CAUSE = {"ADD_TO_INSPECTION", "REGISTER_UNSENSORED_SITE", "ISSUE_NOTICE", "RECOMMEND_STOP_WORK"}
 SITE_ACTIONS = {a for a, (_, routes, _) in CATALOG.items() if "site" in routes} | {"ISSUE_SAFE_WORK_WINDOW"}
 EVIDENCE_DEADLINE = pd.Timedelta(hours=3)
+COVER_DEADLINE = pd.Timedelta(hours=2)   # F10: cover debris with green net within 2 hours
+DUSTY_ACTIVITIES = {"excavation", "demolition", "debris"}
 MIST_LEAD = pd.Timedelta(minutes=90)
 
 CAUSES = ["dry_excavation", "demolition", "truck_trackout", "uncovered_debris", "sensor_fault",
@@ -70,6 +74,9 @@ class SiteContext:
     non_construction: bool = False     # evidence points to a non-construction source
     satellite_active: bool = False     # Sentinel-2 shows new bare ground at the site (F2)
     sensor_known: bool = True          # False when the site's BMC feed isn't connected: unknown is not "none"
+    pm_signature: str | None = None    # nearest real station's PM10/PM2.5 signature: coarse_work | coarse_night | fine | mixed
+    pm_station: str | None = None      # that station's name, for the reasons
+    dry_windy_hours: list = field(default_factory=list)  # forecast working hours, strong wind and dry ground (F10)
     pending_requests: list = field(default_factory=list)  # {"action", "deadline"} not yet answered
 
 
@@ -131,6 +138,15 @@ def hypotheses(c: SiteContext) -> list[tuple[str, float]]:
             w[k] *= 1.2
     elif c.spike_hours and not c.sensitive_avoid:
         w["weather_only"] += 0.1
+    if c.pm_signature == "coarse_work":    # PM10 up far more than PM2.5 in working hours
+        for k in ("dry_excavation", "demolition", "uncovered_debris"):
+            w[k] *= 1.6
+    elif c.pm_signature == "coarse_night":  # coarse dust when heavy vehicles run
+        w["truck_trackout"] *= 1.8
+    elif c.pm_signature == "fine":          # combustion, not construction dust
+        w["non_construction"] += 0.25
+        for k in ("dry_excavation", "demolition", "truck_trackout", "uncovered_debris"):
+            w[k] *= 0.8
     if c.non_construction:
         w["non_construction"] += 1.0
     total = sum(w.values())
@@ -176,6 +192,8 @@ def decide(c: SiteContext) -> Decision | None:
         triggers.append("repeat_exceedance")
     if c.citizen_reports:
         triggers.append("citizen_report")
+    if c.dry_windy_hours and c.activity in DUSTY_ACTIVITIES:
+        triggers.append("dry_windy")
     if overdue:
         triggers.append("evidence_overdue")
     if not triggers:
@@ -206,6 +224,25 @@ def decide(c: SiteContext) -> Decision | None:
                          route="auto" if c.has_relay else "site"))
         if c.sensor_hot_hours >= 2:
             acts.append(_act("PAUSE_DUSTY_TASK", f"D4: still above twice the ambient after {c.sensor_hot_hours} hours."))
+    # F10 playbook: the fix for the most likely cause, sent to the site.
+    emitting = bool(c.spike_hours or c.sensitive_avoid or c.sensor_hot_hours or c.citizen_reports
+                    or c.satellite_active or c.exceedances_7d)
+    cause = hyp[0][0]
+    where = f" at {c.pm_station}" if c.pm_station else ""
+    if emitting and cause == "truck_trackout":
+        why = (f"coarse dust{where} at night, when trucks run" if c.pm_signature == "coarse_night"
+               else "truck track-out is the most likely cause")
+        acts.append(_act("ORDER_WHEEL_WASH", f"F10: {why}; wash wheels at the gate, cover loads and sweep the gate."))
+    if emitting and cause == "uncovered_debris":
+        acts.append(_act("ORDER_COVER_DEBRIS", "F10: uncovered debris is the most likely cause; cover it with green net "
+                                               f"by {_ist(c.now + COVER_DEADLINE)}.", deadline=c.now + COVER_DEADLINE))
+    if "dry_windy" in triggers and not any(a.action == "PRE_WET_SITE" for a in acts):
+        first = min(c.dry_windy_hours)
+        acts.append(_act("PRE_WET_SITE", f"F10: dry ground and strong wind from {_ist(first)}; pre-wet the site "
+                                          "and keep dusty tasks short.", rule="F10"))
+    if emitting and c.pm_signature == "coarse_work" and not any(a.action == "PRE_WET_SITE" for a in acts):
+        acts.append(_act("PRE_WET_SITE", f"F10: coarse dust{where} in working hours points to dry digging or "
+                                          "demolition; spray water while working.", rule="F10"))
     if "sensor_audit" in triggers:  # D5: the basis is the multi-check audit, not a dust cause
         acts.append(_act("FLAG_SENSOR_FOR_AUDIT", f"D5: monitor trust {round(c.trust)}/100; its readings can't clear the site."))
         acts.append(_act("ADD_TO_INSPECTION", f"D5: monitor trust {round(c.trust)}/100.", rule="D5"))
