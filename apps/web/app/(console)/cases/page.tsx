@@ -3,11 +3,12 @@ import { siteLabel } from "@/lib/sites";
 import TopBar from "@/components/TopBar";
 import NoRun from "@/components/Empty";
 import { decideAction } from "@/lib/actions";
-import { getLatestRun, getOpenCases, getWard, type CaseAction } from "@/lib/queries";
+import { getLatestRun, getOpenCases, getVerifications, getWard, type CaseAction } from "@/lib/queries";
 import { ACTION_LABEL, CAUSE_LABEL, caseId, dayHour, ROUTE_LABEL, STATE_LABEL, STATUS_WORD } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
+const VERDICT = { drop: ["go", "Dropped"], no_drop: ["caution", "No drop"], insufficient: ["", "Not enough data"] } as const;
 const TONE: Record<string, string> = { proposed: "dust", approved: "go", declined: "", expired: "avoid", requested: "caution" };
 
 function ActionRow({ a }: { a: CaseAction }) {
@@ -36,7 +37,7 @@ function ActionRow({ a }: { a: CaseAction }) {
 export default async function CasesPage() {
   const [ward, run] = await Promise.all([getWard(), getLatestRun()]);
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
-  const cases = await getOpenCases();
+  const [cases, checks] = await Promise.all([getOpenCases(), getVerifications()]);
 
   return (
     <>
@@ -75,6 +76,37 @@ export default async function CasesPage() {
             </section>
           );
         })}
+        <section className="panel">
+          <div className="ph"><h2>Did the fixes work?</h2><span className="meta">PM10 at the nearest real station downwind, against earlier days with the same wind</span></div>
+          <div className="pb">
+            {checks.recent.length === 0 ? (
+              <p className="small muted" style={{ margin: 0 }}>No action has been checked yet. Six hours after an action, the agent compares PM10 downwind of the site with the same hours on earlier days with the same wind; a drop of 10% or more closes the case.</p>
+            ) : (
+              <>
+                <table className="tbl">
+                  <thead><tr><th>Site</th><th>Action</th><th>From</th><th>PM10 then</th><th>Comparable days</th><th>Result</th></tr></thead>
+                  <tbody>
+                    {checks.recent.map((v) => (
+                      <tr key={v.id} title={v.note ?? undefined}>
+                        <td>{siteLabel(v.site_id, v.site_name)}</td>
+                        <td>{ACTION_LABEL[v.action] ?? v.action}</td>
+                        <td>{dayHour(v.window_start)}</td>
+                        <td className="tab">{v.during !== null ? `${Math.round(v.during)} µg/m³` : "–"}</td>
+                        <td className="tab">{v.baseline !== null ? `${Math.round(v.baseline)} µg/m³ (${v.days} days)` : "–"}</td>
+                        <td><span className={`pill ${VERDICT[v.verdict][0]}`}>{VERDICT[v.verdict][1]}{v.change_pct !== null ? ` ${v.change_pct > 0 ? "+" : ""}${Math.round(v.change_pct)}%` : ""}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {checks.memory.length > 0 && (
+                  <p className="small muted" style={{ marginBottom: 0 }}>
+                    Average change so far: {checks.memory.map((m) => `${ACTION_LABEL[m.action] ?? m.action} ${m.mean_change_pct > 0 ? "+" : ""}${m.mean_change_pct}% (${m.n} checked)`).join(" · ")}.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </section>
       </main>
     </>
   );

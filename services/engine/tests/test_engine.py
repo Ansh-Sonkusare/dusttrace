@@ -240,6 +240,23 @@ def test_forecast_beats_persistence_on_synthetic_year():
     assert ward["p_exceed"].between(0, 1).all()
 
 
+def test_cams_features_are_optional_and_used_when_given():
+    end = pd.Timestamp("2026-10-01T00:00Z")
+    wx = synthetic.weather(end - pd.Timedelta(days=120), end + pd.Timedelta(hours=72))
+    rd = synthetic.readings(wx[wx["ts"] <= end], ["s1"])
+    # A CAMS series that knows something the lags don't: the station's own value, noisy, at the target hour.
+    rng = np.random.default_rng(0)
+    cams = rd.assign(pm10=rd["pm10"] * 0.6 + rng.normal(0, 3, len(rd)))
+    with_c = forecast.train(rd, wx, horizon=24, cams=cams)
+    without = forecast.train(rd, wx, horizon=24)
+    assert set(forecast.CAMS_FEATURES) <= set(with_c.features) and not set(forecast.CAMS_FEATURES) & set(without.features)
+    assert with_c.metrics["mae_model"] < without.metrics["mae_model"]
+    fc = forecast.predict(with_c, rd, wx, end - pd.Timedelta(hours=24), horizon=24, cams=cams)
+    assert len(fc[fc["station_id"] == "ward"]) == 24
+    # a model trained without CAMS ignores a CAMS frame it is handed
+    assert len(forecast.predict(without, rd, wx, end, horizon=24, cams=cams)) > 0
+
+
 def test_overpass_construction_sites():
     sites = overpass.parse_sites(load("overpass_construction.json"))
     by = {s["id"]: s for s in sites}

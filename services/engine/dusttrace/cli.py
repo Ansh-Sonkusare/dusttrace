@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     ro = sub.add_parser("replay-outage")
     ro.add_argument("--days", type=int, default=30)
     bt = sub.add_parser("backtest")
+    bt.add_argument("--compare-cams", action="store_true", help="same window with and without the CAMS features (#32)")
     bt.add_argument("--days", type=int, default=60)
     al = sub.add_parser("all")
     al.add_argument("--mode", choices=["auto", "live", "synthetic"], default="auto")
@@ -80,7 +81,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "discover":
             print("discover:", json.dumps(pipeline.discover_sites(conn, settings), indent=2, default=str))
         if args.cmd == "backtest":
-            print("backtest:", json.dumps(pipeline.backtest(conn, settings, args.days), indent=2, default=str))
+            if args.compare_cams:
+                print("cams feature:", json.dumps(pipeline.compare_cams(conn, settings, args.days), indent=2, default=str))
+            else:
+                print("backtest:", json.dumps(pipeline.backtest(conn, settings, args.days), indent=2, default=str))
         if args.cmd in ("run", "all"):
             print("run:", json.dumps(pipeline.run(conn, settings), indent=2, default=str))
     return 0

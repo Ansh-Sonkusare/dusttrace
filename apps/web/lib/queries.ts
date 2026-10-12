@@ -327,3 +327,25 @@ export async function getLatestDataCheck(): Promise<DataCheck | null> {
   return { ...c, run_id: Number(c.run_id), checked_at: iso(c.checked_at),
            stations: c.stations.map((s) => ({ ...s, name: names[s.station_id] ?? s.station_id })) };
 }
+
+export interface Verification {
+  id: number; site_id: string; site_name: string; action: string; station: string | null; window_start: string;
+  during: number | null; baseline: number | null; change_pct: number | null; days: number;
+  verdict: "drop" | "no_drop" | "insufficient"; note: string | null;
+}
+export interface FixMemory { action: string; n: number; mean_change_pct: number; drops: number }
+
+// Verify (F12, issue #33): recent checks of whether PM10 fell after an action, and the average per action.
+export async function getVerifications(limit = 12): Promise<{ recent: Verification[]; memory: FixMemory[] }> {
+  const recent = await q<Verification>(
+    `select v.id, v.site_id, s.name as site_name, v.action, st.name as station, v.window_start, v.during, v.baseline,
+            v.change_pct, v.days, v.verdict, v.note
+       from verifications v join sites s on s.id = v.site_id left join stations st on st.id = v.station_id
+      where s.ward_id=$1 order by v.checked_at desc, v.id desc limit $2`, [WARD, limit]);
+  const memory = await q<FixMemory>(
+    `select v.action, count(*)::int as n, round(avg(v.change_pct)::numeric, 1)::float as mean_change_pct,
+            count(*) filter (where v.verdict = 'drop')::int as drops
+       from verifications v join sites s on s.id = v.site_id
+      where s.ward_id=$1 and v.verdict <> 'insufficient' group by v.action order by mean_change_pct`, [WARD]);
+  return { recent: recent.map((r) => ({ ...r, window_start: iso(r.window_start) })), memory };
+}

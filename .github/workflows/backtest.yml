@@ -10,7 +10,7 @@ on:
         description: "Days to replay"
         default: "60"
       kind:
-        description: "standard, or outage (verify the CAMS fill)"
+        description: "standard, outage (verify the CAMS fill) or cams (with vs without the CAMS features)"
         default: "standard"
 
 jobs:
@@ -30,7 +30,9 @@ jobs:
           cache: pip
       - run: pip install -e .
       - run: python -m dusttrace init-db
-      - if: ${{ inputs.kind != 'outage' }}
+      - if: ${{ inputs.kind != 'outage' && inputs.kind != 'cams' }}
         run: python -m dusttrace backtest --days "${{ inputs.days || '60' }}"
+      - if: ${{ inputs.kind == 'cams' }}
+        run: python -m dusttrace backtest --compare-cams --days "${{ inputs.days || '30' }}"
       - if: ${{ inputs.kind == 'outage' }}
         run: python -m dusttrace replay-outage --days "${{ inputs.days || '30' }}"
