@@ -182,3 +182,12 @@ h1 { font: 600 30px/1.1 var(--f-ui); letter-spacing: -0.025em; margin: 0; }
 .hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
 .public footer { text-align: center; padding-top: 8px; }
 .btn.big { min-height: 48px; width: 100%; font-size: 15px; }
+
+/* Weekly report: print cleanly (browser "Save as PDF") */
+@media print {
+  .rail, header.top, .banner { display: none !important; }
+  .app { display: block; }
+  body { background: #fff; color: #000; }
+  .panel { break-inside: avoid; background: #fff; border-color: #ccc; }
+  .muted, .meta, .lede { color: #444 !important; }
+}
