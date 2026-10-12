@@ -215,14 +215,17 @@ def write_audits(conn, run_id: int, results) -> None:
 
 
 def site_signals(conn, ward_id: str) -> dict:
-    """Per site: citizen reports in 7 days, confirmed violations in 30 days, and whether an officer
-    confirmed one in the last 7 days. Citizen reports arrive with #8."""
+    """Per site: citizen reports in 7 days (not rejected) and verified ones in 30 days; confirmed
+    violations in 30 and 90 days, and whether an officer confirmed one in the last 7 days."""
     rows = conn.execute("""select s.id,
-                                  count(i.*) filter (where i.outcome='violation' and i.at > now() - interval '30 days'),
-                                  count(i.*) filter (where i.outcome='violation' and i.at > now() - interval '7 days')
-                             from sites s left join inspections i on i.site_id = s.id
-                            where s.ward_id=%s group by s.id""", (ward_id,)).fetchall()
-    return {r[0]: {"reports": 0, "violations": int(r[1]), "confirmed_violation": r[2] > 0} for r in rows}
+            (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > now() - interval '30 days'),
+            (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > now() - interval '7 days'),
+            (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > now() - interval '90 days'),
+            (select count(*) from citizen_reports c where c.site_id=s.id and c.status <> 'rejected' and c.at > now() - interval '7 days'),
+            (select count(*) from citizen_reports c where c.site_id=s.id and c.status = 'verified' and c.at > now() - interval '30 days')
+          from sites s where s.ward_id=%s""", (ward_id,)).fetchall()
+    return {r[0]: {"reports": int(r[4]), "verified_reports": int(r[5]), "violations": int(r[1]),
+                   "violations_90d": int(r[3]), "confirmed_violation": r[2] > 0} for r in rows}
 
 
 def write_ranking(conn, run_id: int, ranked) -> None:
@@ -273,3 +276,16 @@ def write_case(conn, run_id: int, site_id: str, d) -> str:
         conn.execute("""update case_actions set status='expired' where case_id=%s and status='requested'
                         and action = any(%s)""", (case_id, d.expired))
     return d.state
+
+
+def write_dust_scores(conn, run_id: int, scores: dict) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into dust_scores (run_id, site_id, score, band, components, notes) values (%s,%s,%s,%s,%s,%s)""",
+            [(run_id, sid, s.score, s.band, json.dumps(s.components), s.notes) for sid, s in scores.items()],
+        )
+
+
+def windows_followed(conn, ward_id: str) -> dict:
+    """Share of issued Avoid plans each site accepted. Empty until plan acceptance exists (#9)."""
+    return {}

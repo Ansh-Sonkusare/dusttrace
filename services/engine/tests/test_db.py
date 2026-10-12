@@ -158,7 +158,8 @@ def test_confirmed_violations_raise_priority_and_reach_the_agent(conn, settings)
     conn.execute("insert into inspections (site_id, outcome, note, officer) values ('A','violation','dry cutting','test')")
     conn.execute("insert into inspections (site_id, outcome, officer) values ('B','compliant','test')")
     conn.commit()
-    assert db.site_signals(conn, "K-East")["A"] == {"reports": 0, "violations": 1, "confirmed_violation": True}
+    a = db.site_signals(conn, "K-East")["A"]
+    assert (a["reports"], a["violations"], a["confirmed_violation"]) == (0, 1, True)
     assert db.site_signals(conn, "K-East")["B"]["violations"] == 0
     second = pipeline.run(conn, settings)
     after = one(conn, "select components->>'violations', reasons from inspection_rank where run_id=%s and site_id='A'",
@@ -167,3 +168,20 @@ def test_confirmed_violations_raise_priority_and_reach_the_agent(conn, settings)
     # A's case now counts the officer's finding as evidence
     sig = one(conn, "select signals from cases where site_id='A' and closed_at is null")
     assert sig is None or "officer inspection" in sig[0]
+
+
+def test_run_scores_every_site_and_counts_citizen_reports(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    conn.execute("insert into citizen_reports (site_id, kind) values ('C','dry_excavation'), ('C','uncovered_truck')")
+    conn.execute("insert into citizen_reports (site_id, kind, status) values ('C','other','verified'), ('B','other','rejected')")
+    conn.commit()
+    sig = db.site_signals(conn, "K-East")
+    assert sig["C"]["reports"] == 3 and sig["C"]["verified_reports"] == 1 and sig["B"]["reports"] == 0
+    out = pipeline.run(conn, settings)
+    rows = {r[0]: r for r in conn.execute(
+        "select site_id, score, band, components from dust_scores where run_id=%s", (out["run_id"],)).fetchall()}
+    assert sorted(rows) == list("ABCDEF")
+    assert rows["A"][1] > rows["C"][1]  # trusted monitor, no reports
+    assert rows["D"][3]["trust"] == 0   # no monitor
+    rank_c = one(conn, "select components->>'reports' from inspection_rank where run_id=%s and site_id='C'", (out["run_id"],))
+    assert float(rank_c[0]) > 0

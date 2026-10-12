@@ -160,3 +160,19 @@ h1 { font: 600 30px/1.1 var(--f-ui); letter-spacing: -0.025em; margin: 0; }
 .outcome textarea { width: 100%; box-sizing: border-box; background: var(--sunk); color: var(--text); border: 1px solid var(--line-2); border-radius: 12px; padding: 10px 12px; font: 14px/1.4 var(--f-ui); margin-bottom: 10px; }
 .outcome .btn { min-height: 44px; padding: 10px 18px; }
 @media (max-width: 760px) { .outcome fieldset { grid-template-columns: minmax(0, 1fr); } }
+
+/* Public site page (QR): one column, phone first */
+.public { max-width: 640px; margin: 0 auto; padding: 16px 16px 40px; display: flex; flex-direction: column; gap: 14px; }
+.pub-head { display: flex; align-items: center; gap: 10px; padding: 4px 0 8px; }
+.pub-head svg { width: 28px; height: 28px; }
+.public h1 { font-size: 26px; margin: 0; }
+.banner.ok { border-color: var(--go); background: var(--go-tint); }
+.score { display: flex; align-items: center; gap: 20px; }
+.score-v { font: 300 64px/1 var(--f-ui); letter-spacing: -0.04em; }
+.score-v small { font-size: 18px; color: var(--text-3); letter-spacing: 0; }
+.parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; font-size: 13.5px; }
+.parts li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
+.parts .track { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--sunk); overflow: hidden; }
+.parts .track span { display: block; height: 100%; background: #C9C9CE; }
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.public footer { text-align: center; padding-top: 8px; }
