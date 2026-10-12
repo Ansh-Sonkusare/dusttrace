@@ -35,7 +35,7 @@ export default async function Overview() {
           <h1>Next 48 hours in {ward.name}</h1>
           <p className="lede">Where construction dust will travel, who it reaches, and when each site should hold dusty work.</p>
         </div>
-        {notice && <div className="banner">{notice}</div>}
+        {notice && <div className="banner">{notice} <Link href="/data">See the data check</Link>.</div>}
         <section className="stats" aria-label="Ward at a glance">
           {kpiTiles(kpis).map((t) => (
             <div key={t.label} className="panel stat"><span className="v">{t.value}</span><span className="d">{t.label}</span></div>

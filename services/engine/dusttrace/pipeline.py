@@ -8,7 +8,10 @@ from datetime import timedelta
 
 import pandas as pd
 
+from psycopg.types.json import Jsonb
+
 from . import agent, alerts, attribution, audit, backtest as bt, db, dust_score, fill, forecast, windows
+from . import verify as verify_mod
 from .config import Settings, load_seed
 from .sources import cams, openaq, openmeteo, overpass, synthetic
 
@@ -184,7 +187,7 @@ def run(conn, settings: Settings) -> dict:
     fill_info["stations"] = int(used["station_id"].nunique())
     fill_info["hours"] = int(used.groupby("station_id").size().max()) if len(used) else 0
     metrics = {**model.metrics, "stations": list(active), "audit": bench, "newest_real_reading": newest_real,
-               "filled": fill_info}
+               "filled": fill_info, "inputs": verify_mod.input_shares(rd, t0)}
     run_id = db.create_run(conn, ward_id, t0.to_pydatetime(), data_mode, "lightgbm-direct-v1", metrics)
     db.write_forecasts(conn, run_id, fc)
     db.write_audits(conn, run_id, audits)
@@ -309,6 +312,59 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
 
 
 FILL_MAX_STALE = pd.Timedelta(days=30)  # a station silent for longer is treated as closed, not filled
+
+
+def verify(conn, settings: Settings) -> dict:
+    """Data check (issue #29) for the latest run: freshness per source, the real/filled/synthetic
+    split, and the CAMS fill's error on a hold-out month. Stores one `data_checks` row."""
+    ward_id = settings.ward_id
+    run = conn.execute("select id, issued_at, metrics from runs where ward_id=%s order by id desc limit 1",
+                       (ward_id,)).fetchone()
+    if not run:
+        raise RuntimeError("No run yet. Run `dusttrace run` first.")
+    run_id, issued, metrics = run[0], pd.Timestamp(run[1]), run[2] or {}
+    now = now_hour()
+
+    newest = dict(conn.execute("""select s.id, max(r.ts) from stations s
+                                    left join readings r on r.station_id = s.id and not r.synthetic and r.pm10 is not null
+                                   where s.ward_id=%s and s.source <> 'seed' group by s.id""", (ward_id,)).fetchall())
+    stations = verify_mod.station_freshness(newest, now)
+
+    cams = {}
+    cm = db.read_frame(conn, """select c.station_id, c.ts, c.pm10 from cams_hourly c join stations s on s.id = c.station_id
+                                 where s.ward_id=%s and c.pm10 is not null""", (ward_id,))
+    if not cm.empty:
+        ob = db.read_frame(conn, """select r.station_id, r.ts, r.pm10 from readings r join stations s on s.id = r.station_id
+                                     where s.ward_id=%s and not r.synthetic and r.pm10 is not null
+                                       and r.ts > now() - interval '120 days'""", (ward_id,))
+        for f in (cm, ob):
+            f["ts"] = pd.to_datetime(f["ts"], utc=True)
+            f["pm10"] = f["pm10"].astype(float)
+        for sid, o in ob.groupby("station_id"):
+            h = verify_mod.cams_holdout(o.set_index("ts")["pm10"], cm[cm["station_id"] == sid].set_index("ts")["pm10"])
+            if h:
+                cams[sid] = h
+
+    horizon = conn.execute("""select count(*), count(*) filter (where not synthetic) from weather_hourly
+                               where ward_id=%s and ts > %s and ts <= %s""",
+                           (ward_id, issued, issued + pd.Timedelta(hours=settings.horizon_hours))).fetchone()
+    weather_live = round(horizon[1] / horizon[0], 4) if horizon[0] else 0.0
+    receptors_osm = conn.execute("select count(*) from receptors where ward_id=%s and source='osm'", (ward_id,)).fetchone()[0]
+    sites_real = conn.execute("select count(*) from sites where ward_id=%s and not demo", (ward_id,)).fetchone()[0]
+    scene = conn.execute("select max(scene_after), max(found_at) from site_candidates where ward_id=%s", (ward_id,)).fetchone()
+    shares = metrics.get("inputs") or {"hours": 0, "real": 0.0, "filled": 0.0, "synthetic": 0.0}
+    probs = verify_mod.problems(stations, shares, weather_live, receptors_osm, sites_real)
+    sources = {"weather_live": weather_live, "receptors_osm": int(receptors_osm), "sites_real": int(sites_real),
+               "satellite_scene": scene[0], "satellite_found_at": scene[1].isoformat() if scene[1] else None,
+               "run_issued_at": issued.isoformat(), "data_mode": None}
+    sources["data_mode"] = conn.execute("select data_mode from runs where id=%s", (run_id,)).fetchone()[0]
+    ok = not probs
+    conn.execute("""insert into data_checks (ward_id, run_id, ok, shares, stations, cams, sources, problems)
+                    values (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                 (ward_id, run_id, ok, Jsonb(shares), Jsonb(stations), Jsonb(cams), Jsonb(sources), Jsonb(probs)))
+    conn.commit()
+    return {"run_id": run_id, "ok": ok, "shares": shares, "stations": stations, "cams": cams, "problems": probs,
+            **sources}
 
 
 def fill_from_cams(conn, ward_id: str, rd: pd.DataFrame, now: pd.Timestamp) -> tuple[pd.DataFrame, dict]:

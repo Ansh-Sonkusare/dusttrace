@@ -309,3 +309,25 @@ def test_demo_sites_can_be_switched_off(conn, settings, monkeypatch):
     monkeypatch.setenv("DUSTTRACE_DEMO_SITES", "0")
     out = pipeline.run(conn, settings)
     assert [r[0] for r in conn.execute("select distinct site_id from safe_windows where run_id=%s", (out["run_id"],))] == ["osm-way-101"]
+
+
+def test_verify_stores_how_real_the_latest_run_is(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    out = pipeline.run(conn, settings)
+    assert out["metrics"]["inputs"]["synthetic"] == 1.0  # every station hour this week is synthetic
+    chk = pipeline.verify(conn, settings)
+    row = one(conn, "select run_id, ok, shares->>'synthetic', jsonb_array_length(problems) from data_checks order by id desc limit 1")
+    assert row[0] == out["run_id"] and row[1] is False and float(row[2]) == 1.0 and row[3] >= 2
+    assert chk["weather_live"] == 0.0 and any("synthetic weather" in p for p in chk["problems"])
+    assert chk["receptors_osm"] == 0 and chk["sites_real"] == 0
+
+
+def test_verify_measures_the_cams_fill_on_real_stations(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    _real_with_cams(conn, stale_hours=96)
+    pipeline.run(conn, settings)
+    chk = pipeline.verify(conn, settings)
+    st = {s["station_id"]: s for s in chk["stations"]}
+    assert st["openaq-7"]["status"] == "stale" and 95 <= st["openaq-7"]["age_h"] <= 98
+    h = chk["cams"]["openaq-7"]
+    assert h["hours"] >= 24 * 29 and h["mae"] < 10

@@ -57,3 +57,6 @@ jobs:
       - name: Forecast, plumes, Safe-Work Windows
         if: steps.gate.outputs.ok == 'true'
         run: python -m dusttrace run
+      - name: Data check
+        if: steps.gate.outputs.ok == 'true'
+        run: python -m dusttrace verify
