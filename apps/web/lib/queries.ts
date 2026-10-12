@@ -6,7 +6,7 @@ export interface Run {
   id: number;
   issued_at: string;
   created_at: string;
-  data_mode: "live" | "synthetic" | "mixed";
+  data_mode: "live" | "synthetic" | "mixed" | "filled";
   model: string;
   metrics: {
     mae_model?: number;
@@ -19,6 +19,7 @@ export interface Run {
     stations?: string[];
     audit?: { n: number; precision: number; recall: number; detected?: Record<string, number> };
     newest_real_reading?: string | null;
+    filled?: { stations: number; hours: number; corrections?: Record<string, { slope: number; intercept: number; mae: number; hours: number }> };
   };
 }
 
@@ -282,10 +283,10 @@ export interface Backtest {
   note: string | null;
 }
 
-export async function getLatestBacktest(): Promise<Backtest | null> {
+export async function getLatestBacktest(kind: "standard" | "outage_replay" = "standard"): Promise<Backtest | null> {
   const r = await q<Backtest>(
     `select id, created_at, data_mode, stations, train_end, test_end, origins, metrics, spike_day, note
-       from backtests where ward_id=$1 order by created_at desc limit 1`, [WARD]);
+       from backtests where ward_id=$1 and kind=$2 order by created_at desc limit 1`, [WARD, kind]);
   return r[0] ? { ...r[0], created_at: iso(r[0].created_at), train_end: iso(r[0].train_end), test_end: iso(r[0].test_end) } : null;
 }
 

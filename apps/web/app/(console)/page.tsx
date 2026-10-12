@@ -21,7 +21,7 @@ export default async function Overview() {
     getSites(), getReceptors(), getStations(run.metrics.stations), getKpis(run), getAlerts(run.id),
   ]);
   const hours = buildMapHours(windows, plumes, wx);
-  const notice = dataNotice(run.data_mode, run.metrics.newest_real_reading, run.issued_at);
+  const notice = dataNotice(run.data_mode, run.metrics.newest_real_reading, run.issued_at, run.metrics.filled?.stations ?? 0);
 
   const nextAvoid = sites.flatMap((s) =>
     spans(windows.filter((w) => w.site_id === s.id)).filter((sp) => sp.status === "avoid").slice(0, 1).map((sp) => ({ site: s, sp })),

@@ -329,3 +329,17 @@ def write_candidates(conn, ward_id: str, before: str, after: str, cands: list[di
         )
     conn.commit()
     return len(cands)
+
+
+def write_cams(conn, df: pd.DataFrame) -> int:
+    """CAMS model values at station positions; refreshed on every ingest (the forecast part changes)."""
+    df = df.dropna(subset=["pm10"]) if not df.empty else df
+    if df.empty:
+        return 0
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into cams_hourly (station_id, ts, pm10, pm25) values (%s,%s,%s,%s)
+               on conflict (station_id, ts) do update set pm10=excluded.pm10, pm25=excluded.pm25, fetched_at=now()""",
+            [(r.station_id, pd.Timestamp(r.ts).to_pydatetime(), _f(r.pm10), _f(r.pm25)) for r in df.itertuples()],
+        )
+    return len(df)

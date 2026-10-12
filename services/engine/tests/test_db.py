@@ -255,3 +255,34 @@ def test_satellite_candidates_are_stored_and_reach_the_agent(conn, settings):
     pipeline.run(conn, settings)
     acts = _case_actions(conn, "D")
     assert ("REGISTER_UNSENSORED_SITE", "D6") in acts and ("REQUEST_SPOT_CHECK", "D1") not in acts
+
+
+def _real_with_cams(conn, stale_hours, days=70):
+    """A real station whose feed stopped `stale_hours` ago, with CAMS (reading 40% low) up to now."""
+    db.upsert_station(conn, {"id": "openaq-7", "name": "Real seven", "source": "openaq", "lat": 19.11, "lon": 72.86}, "K-East")
+    ts = pd.date_range(end=pipeline.now_hour() + pd.Timedelta(hours=48), periods=24 * days + 48, freq="h", tz="UTC")
+    truth = 70 + 25 * np.sin(np.arange(len(ts)) / 24 * 2 * np.pi)
+    real = pd.DataFrame({"station_id": "openaq-7", "ts": ts, "pm10": truth, "pm25": truth * 0.4})
+    real = real[real["ts"] <= pipeline.now_hour() - pd.Timedelta(hours=stale_hours)]
+    db.write_readings(conn, real, synthetic=False)
+    db.write_cams(conn, pd.DataFrame({"station_id": "openaq-7", "ts": ts, "pm10": truth * 0.6, "pm25": truth * 0.25}))
+    conn.commit()
+
+
+def test_stale_station_is_filled_from_corrected_cams_not_samples(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    _real_with_cams(conn, stale_hours=96)
+    out = pipeline.run(conn, settings)
+    assert out["stations"] == ["openaq-7"]           # the real station, not the seed-* samples
+    f = out["metrics"]["filled"]
+    assert f["stations"] == 1 and 95 <= f["hours"] <= 97
+    assert f["corrections"]["openaq-7"]["mae"] < 3     # CAMS was a clean 0.6x of the truth
+    assert out["metrics"]["newest_real_reading"] is not None
+    assert one(conn, "select count(*) from readings where station_id='openaq-7' and ts > now() - interval '90 hours'")[0] == 0
+
+
+def test_long_dead_station_is_not_revived(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    _real_with_cams(conn, stale_hours=24 * 40)
+    out = pipeline.run(conn, settings)
+    assert "openaq-7" not in out["stations"] and out["metrics"]["filled"]["stations"] == 0
