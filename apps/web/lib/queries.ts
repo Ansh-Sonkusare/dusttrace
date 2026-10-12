@@ -241,3 +241,34 @@ export async function getLastAcceptance(siteId: string): Promise<{ accepted_at: 
     "select accepted_at, run_id from plan_acceptances where site_id=$1 order by accepted_at desc limit 1", [siteId]);
   return r[0] ? { ...r[0], accepted_at: iso(r[0].accepted_at) } : null;
 }
+
+export interface AlertRow { id: number; kind: "critical" | "action" | "receptor" | "sensor"; site_id: string | null; case_id: number | null; title: string; action: string }
+
+export async function getAlerts(runId: number): Promise<AlertRow[]> {
+  return q<AlertRow>(
+    `select id, kind, site_id, case_id, title, action from alerts where run_id=$1
+      order by array_position(array['critical','action','receptor','sensor'], kind), site_id`,
+    [runId],
+  );
+}
+
+// Raw numbers behind the overview KPI tiles (F11).
+export async function getKpis(run: Run): Promise<import("./kpi").KpiRaw> {
+  const r = await q<{ spike: number | null; holding: number; untrusted: number; decisions: number; reports: number }>(
+    `select
+       (select max(p_exceed) from forecasts where run_id=$1 and station_id='ward'
+          and (ts at time zone 'Asia/Kolkata')::date = ($2::timestamptz at time zone 'Asia/Kolkata')::date + 1) as spike,
+       (select count(distinct site_id)::int from safe_windows where run_id=$1 and status='avoid'
+          and ts <= $2::timestamptz + interval '24 hours'
+          and extract(hour from ts at time zone 'Asia/Kolkata') between 6 and 21) as holding,
+       (select count(*)::int from sensor_audits where run_id=$1 and band='untrusted') as untrusted,
+       (select count(*)::int from case_actions a join cases c on c.id = a.case_id
+          where c.closed_at is null and a.phase='final' and a.status='proposed') as decisions,
+       (select count(*)::int from citizen_reports cr join sites s on s.id = cr.site_id
+          where s.ward_id=$3 and cr.status='new') as reports`,
+    [run.id, run.issued_at, WARD],
+  );
+  const x = r[0];
+  return { spike_p_tomorrow: x.spike == null ? null : Number(x.spike), sites_holding: x.holding, untrusted: x.untrusted,
+           decisions: x.decisions, new_reports: x.reports };
+}

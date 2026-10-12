@@ -244,15 +244,16 @@ def pending_requests(conn, site_id: str) -> list[dict]:
     return [{"action": r[0], "deadline": r[1]} for r in rows]
 
 
-def write_case(conn, run_id: int, site_id: str, d) -> str:
+def write_case(conn, run_id: int, site_id: str, d) -> int | None:
     """Update the site's open case with this run's decision, or open one; close it when nothing triggers.
-    Existing actions keep their status and deadline, so officer decisions and D7 clocks survive runs."""
+    Existing actions keep their status and deadline, so officer decisions and D7 clocks survive runs.
+    Returns the open case id, or None when there is no open case."""
     row = conn.execute("select id from cases where site_id=%s and closed_at is null", (site_id,)).fetchone()
     if d is None:
         if row:
             conn.execute("""update cases set state='DONE', closed_at=now(), updated_at=now(), last_run_id=%s,
                             stop_reason='Nothing triggers in the latest run.' where id=%s""", (run_id, row[0]))
-        return "DONE" if row else "NONE"
+        return None
     vals = (d.state, d.triggers, d.signals, json.dumps(d.hypotheses), d.what_changed, d.stop_reason, run_id)
     if row:
         case_id = row[0]
@@ -275,7 +276,20 @@ def write_case(conn, run_id: int, site_id: str, d) -> str:
     if d.expired:
         conn.execute("""update case_actions set status='expired' where case_id=%s and status='requested'
                         and action = any(%s)""", (case_id, d.expired))
-    return d.state
+    return case_id
+
+
+def plans_accepted_today(conn, ward_id: str) -> set[str]:
+    rows = conn.execute("""select distinct p.site_id from plan_acceptances p join sites s on s.id = p.site_id
+                            where s.ward_id=%s and (p.accepted_at at time zone 'Asia/Kolkata')::date
+                                  = (now() at time zone 'Asia/Kolkata')::date""", (ward_id,)).fetchall()
+    return {r[0] for r in rows}
+
+
+def write_alerts(conn, run_id: int, rows) -> None:
+    with conn.cursor() as cur:
+        cur.executemany("insert into alerts (run_id, kind, site_id, case_id, title, action) values (%s,%s,%s,%s,%s,%s)",
+                        [(run_id, a.kind, a.site_id, a.case_id, a.title, a.action) for a in rows])
 
 
 def write_dust_scores(conn, run_id: int, scores: dict) -> None:

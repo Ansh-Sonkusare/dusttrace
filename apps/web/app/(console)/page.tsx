@@ -2,27 +2,24 @@ import TopBar from "@/components/TopBar";
 import DustMap from "@/components/DustMap";
 import NoRun from "@/components/Empty";
 import Link from "next/link";
-import { getLatestRun, getPlumes, getReceptors, getSites, getStations, getWard, getWardForecast, getWeather, getWindows } from "@/lib/queries";
+import { getAlerts, getKpis, getLatestRun, getPlumes, getReceptors, getSites, getStations, getWard, getWardForecast, getWeather, getWindows } from "@/lib/queries";
+import { kpiTiles } from "@/lib/kpi";
 import { buildMapHours, spans } from "@/lib/mapHours";
 import { dayHour, hhmm } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
+const ALERT_TONE = { critical: "var(--avoid)", action: "var(--caution)", receptor: "var(--dust)", sensor: "var(--line-2)" } as const;
+
 export default async function Overview() {
   const [ward, run] = await Promise.all([getWard(), getLatestRun()]);
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
 
-  const [fc, windows, plumes, wx, sites, receptors, stations] = await Promise.all([
+  const [fc, windows, plumes, wx, sites, receptors, stations, kpis, alerts] = await Promise.all([
     getWardForecast(run.id), getWindows(run.id), getPlumes(run.id), getWeather(run.issued_at),
-    getSites(), getReceptors(), getStations(run.metrics.stations),
+    getSites(), getReceptors(), getStations(run.metrics.stations), getKpis(run), getAlerts(run.id),
   ]);
   const hours = buildMapHours(windows, plumes, wx);
-  const peak = fc.length ? fc.reduce((a, b) => (b.pm10 > a.pm10 ? b : a)) : null;
-  const likelyOver = fc.filter((f) => f.p_exceed >= 0.5).length;
-  const cut24 = new Date(run.issued_at).getTime() + 24 * 3600_000;
-  const avoid24 = windows.filter((w) => w.status === "avoid" && new Date(w.ts).getTime() <= cut24).length;
-  const firstTs = hours[0]?.ts;
-  const exposedNow = windows.filter((w) => w.ts === firstTs).reduce((s, w) => s + w.exposed_people, 0);
 
   const nextAvoid = sites.flatMap((s) =>
     spans(windows.filter((w) => w.site_id === s.id)).filter((sp) => sp.status === "avoid").slice(0, 1).map((sp) => ({ site: s, sp })),
@@ -39,16 +36,37 @@ export default async function Overview() {
         {run.data_mode !== "live" && (
           <div className="banner">This run uses {run.data_mode === "mixed" ? "partly " : ""}synthetic readings or weather because the live sources were unreachable. Treat the numbers as a demonstration until the live ingest runs.</div>
         )}
-        <section className="stats" aria-label="Summary">
-          <div className="panel stat"><span className="v">{peak ? Math.round(peak.pm10) : "–"}</span><span className="d">Peak ward PM10, µg/m³<br />{peak ? dayHour(peak.ts) : ""}</span></div>
-          <div className="panel stat"><span className="v">{likelyOver}</span><span className="d">Hours likely above<br />the 100 standard</span></div>
-          <div className="panel stat"><span className="v">{avoid24}</span><span className="d">Site-hours to avoid<br />in the next 24 h</span></div>
-          <div className="panel stat"><span className="v">{exposedNow.toLocaleString("en-IN")}</span><span className="d">People inside a plume<br />this hour</span></div>
+        <section className="stats" aria-label="Ward at a glance">
+          {kpiTiles(kpis).map((t) => (
+            <div key={t.label} className="panel stat"><span className="v">{t.value}</span><span className="d">{t.label}</span></div>
+          ))}
         </section>
         <div className="grid2">
           <section className="panel" aria-label="Plume map">
             <div className="ph"><h2>Plume map</h2><span className="meta">Gaussian plume, hourly</span></div>
             <DustMap center={[ward.center_lon, ward.center_lat]} sites={sites} receptors={receptors} stations={stations} hours={hours} />
+          </section>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <section className="panel" aria-label="Alerts">
+            <div className="ph"><h2>Alerts</h2><span className="meta">Logged, not sent</span></div>
+            <div className="pb">
+              {alerts.length === 0 ? <p className="small muted">No alerts in this run.</p> : (
+                <ul className="list">
+                  {alerts.slice(0, 6).map((a) => (
+                    <li key={a.id}>
+                      <Link href={a.case_id ? "/cases" : `/sites/${a.site_id}`} className="item">
+                        <span className="bar" style={{ background: ALERT_TONE[a.kind] }} />
+                        <div>
+                          <div className="hd"><b>{a.title}</b></div>
+                          <p>{a.action}</p>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {alerts.length > 6 && <p className="small muted" style={{ margin: "8px 0 0" }}>{alerts.length - 6} more on the Cases page.</p>}
+            </div>
           </section>
           <section className="panel" aria-label="Next hold periods">
             <div className="ph"><h2>Next hold periods</h2><Link className="meta" href="/sites">All sites</Link></div>
@@ -71,6 +89,7 @@ export default async function Overview() {
               )}
             </div>
           </section>
+          </div>
         </div>
       </main>
     </>

@@ -40,21 +40,8 @@ export default function DustMap({ center, sites, receptors, stations, hours }: {
       center,
       zoom: 13.3,
       attributionControl: { compact: true },
-      style: {
-        version: 8,
-        sources: {
-          base: {
-            type: "raster",
-            tiles: ["a", "b", "c", "d"].map((s) => `https://${s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png`),
-            tileSize: 256,
-            attribution: "© OpenStreetMap contributors © CARTO",
-          },
-        },
-        layers: [
-          { id: "bg", type: "background", paint: { "background-color": "#121214" } },
-          { id: "base", type: "raster", source: "base", paint: { "raster-opacity": 0.9 } },
-        ],
-      },
+      // OpenFreeMap: free OSM vector tiles, no API key (CARTO's basemaps started requiring one in 2026).
+      style: "https://tiles.openfreemap.org/styles/dark",
     });
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     m.on("load", () => {
@@ -67,7 +54,7 @@ export default function DustMap({ center, sites, receptors, stations, hours }: {
         data: { type: "FeatureCollection", features: receptors.map((r) => ({ type: "Feature", properties: { name: r.name, kind: r.kind }, geometry: { type: "Point", coordinates: [r.lon, r.lat] } })) },
       });
       m.addLayer({ id: "receptors", type: "circle", source: "receptors", paint: { "circle-radius": 5, "circle-color": "#F2F2F2", "circle-stroke-color": "#0B0B0C", "circle-stroke-width": 2 } });
-      m.addLayer({ id: "receptor-labels", type: "symbol", source: "receptors", minzoom: 14, layout: { "text-field": ["get", "name"], "text-size": 11, "text-offset": [0, 1.2], "text-anchor": "top", "text-optional": true }, paint: { "text-color": "#A3A3A8", "text-halo-color": "#0B0B0C", "text-halo-width": 1.5 } });
+      m.addLayer({ id: "receptor-labels", type: "symbol", source: "receptors", minzoom: 14, layout: { "text-field": ["get", "name"], "text-size": 11, "text-offset": [0, 1.2], "text-anchor": "top", "text-optional": true, "text-font": ["Noto Sans Regular"] }, paint: { "text-color": "#A3A3A8", "text-halo-color": "#0B0B0C", "text-halo-width": 1.5 } });
 
       m.addSource("stations", {
         type: "geojson",
@@ -77,7 +64,7 @@ export default function DustMap({ center, sites, receptors, stations, hours }: {
 
       m.addSource("sites", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       m.addLayer({ id: "sites", type: "circle", source: "sites", paint: { "circle-radius": 11, "circle-color": ["get", "color"], "circle-stroke-color": "#0B0B0C", "circle-stroke-width": 3 } });
-      m.addLayer({ id: "site-labels", type: "symbol", source: "sites", layout: { "text-field": ["get", "id"], "text-size": 12, "text-font": ["Open Sans Bold"], "text-allow-overlap": true }, paint: { "text-color": "#0B0B0C" } });
+      m.addLayer({ id: "site-labels", type: "symbol", source: "sites", layout: { "text-field": ["get", "id"], "text-size": 12, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true }, paint: { "text-color": "#0B0B0C" } });
       setReady(true);
     });
     map.current = m;

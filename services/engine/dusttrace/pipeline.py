@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pandas as pd
 
-from . import agent, attribution, audit, db, dust_score, forecast, windows
+from . import agent, alerts, attribution, audit, db, dust_score, forecast, windows
 from .config import Settings, load_seed
 from .sources import openaq, openmeteo, overpass, synthetic
 
@@ -159,7 +159,8 @@ def run(conn, settings: Settings) -> dict:
     ranked = rank_sites(conn, ward_id, sites, list(active), future, ward_fc, audits)
     db.write_ranking(conn, run_id, ranked)
     db.write_dust_scores(conn, run_id, score_sites(conn, ward_id, ranked, audits))
-    respond(conn, ward_id, run_id, now_hour(), hours, recs, ward_fc, audits, hot)
+    states = respond(conn, ward_id, run_id, now_hour(), hours, recs, ward_fc, audits, hot)
+    db.write_alerts(conn, run_id, alerts.derive(states))
     conn.commit()
 
     counts = pd.Series([h.status for h in hours]).value_counts().to_dict()
@@ -221,7 +222,7 @@ def audit_sensors(conn, ward_id: str, rd: pd.DataFrame, wx: pd.DataFrame, t0: pd
 def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.DataFrame,
             ward_p: pd.Series, audits, hot: dict) -> dict:
     """Dust Response Agent (F12): build each site's context from this run, let the policy engine
-    decide, and update the site's open case. Returns {site_id: state}."""
+    decide, and update the site's open case. Returns each site's state for the ward alerts (F11)."""
     names = recs.set_index("id")["name"].to_dict()
     kinds = recs.set_index("id")["kind"].to_dict()
     sites = db.read_frame(conn, """select s.id, s.name, s.activity, n.id is not null as has_sensor,
@@ -230,7 +231,8 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
                                     where s.ward_id=%s order by s.id""", (ward_id,))
     trust = {a.site_id: a.score for a in audits}
     signals = db.site_signals(conn, ward_id)
-    states = {}
+    accepted = db.plans_accepted_today(conn, ward_id)
+    states = []
     for s in sites.itertuples():
         # Only hours when dusty work is allowed (06:00-22:00 IST) can need a site to act.
         mine = [h for h in hours if h.site_id == s.id and 6 <= plume_hour(h.ts) < 22]
@@ -248,7 +250,10 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
             confirmed_violation=signals.get(s.id, {}).get("confirmed_violation", False),
         )
         decision = agent.decide(ctx)
-        states[s.id] = db.write_case(conn, run_id, s.id, decision)
+        case_id = db.write_case(conn, run_id, s.id, decision)
+        first = min((h for h in hours if h.site_id == s.id), key=lambda h: h.ts, default=None)
+        states.append(alerts.SiteState(ctx, decision, case_id, s.id in accepted,
+                                       avoid_now=first is not None and first.status == "avoid"))
     return states
 
 
