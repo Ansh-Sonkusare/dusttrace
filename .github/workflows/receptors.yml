@@ -1,6 +1,6 @@
 name: Weekly receptors
 
-# Refreshes schools and hospitals from OpenStreetMap. Weekly is plenty: they rarely change.
+# Refreshes schools, hospitals and mapped construction sites from OpenStreetMap. Weekly is plenty.
 # Needs the DATABASE_URL repository secret, like the hourly forecast.
 
 on:
@@ -34,3 +34,6 @@ jobs:
         run: pip install -e .
       - if: steps.gate.outputs.ok == 'true'
         run: python -m dusttrace init-db && python -m dusttrace osm
+      - name: Construction sites
+        if: steps.gate.outputs.ok == 'true'
+        run: python -m dusttrace osm-sites

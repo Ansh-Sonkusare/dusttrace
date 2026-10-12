@@ -5,6 +5,7 @@ import NoRun from "@/components/Empty";
 import TrustPill from "@/components/TrustPill";
 import { getAudits, getLatestRun, getSites, getWard, getWindows } from "@/lib/queries";
 import { ACTIVITY_LABEL } from "@/lib/format";
+import { sourceLabel } from "@/lib/sites";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,9 @@ export default async function SitesPage() {
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
   const [sites, windows, audits] = await Promise.all([getSites(), getWindows(run.id), getAudits(run.id)]);
   const bench = run.metrics.audit;
+  // Only the sites this run covered (demo sites can be switched off in the engine).
+  const inRun = new Set(windows.map((w) => w.site_id));
+  const shown = inRun.size ? sites.filter((s) => inRun.has(s.id)) : sites;
 
   return (
     <>
@@ -28,13 +32,13 @@ export default async function SitesPage() {
             <table className="tbl">
               <thead><tr><th>Site</th><th>Activity</th><th>Sensor trust</th><th style={{ width: "46%" }}>Next 48 hours</th><th>Avoid</th></tr></thead>
               <tbody>
-                {sites.map((s) => {
+                {shown.map((s) => {
                   const rows = windows.filter((w) => w.site_id === s.id);
                   return (
                     <tr key={s.id}>
-                      <td><Link href={`/sites/${s.id}`}><b>{s.id}</b> {s.name}</Link>{s.demo && <span className="pill" style={{ marginLeft: 8 }}>Demo</span>}</td>
+                      <td><Link href={`/sites/${s.id}`}><b>{s.id}</b> {s.name}</Link>{sourceLabel(s) && <span className="pill" style={{ marginLeft: 8 }}>{sourceLabel(s)}</span>}</td>
                       <td>{ACTIVITY_LABEL[s.activity] ?? s.activity}</td>
-                      <td><TrustPill audit={audits.find((a) => a.site_id === s.id)} /></td>
+                      <td><TrustPill audit={audits.find((a) => a.site_id === s.id)} status={s.sensor_status} /></td>
                       <td><WindowStrip rows={rows} /></td>
                       <td className="tab">{rows.filter((r) => r.status === "avoid").length} h</td>
                     </tr>

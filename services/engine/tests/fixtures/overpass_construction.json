@@ -1,0 +1,95 @@
+{
+ "elements": [
+  {
+   "type": "way",
+   "id": 101,
+   "center": {
+    "lat": 19.1172,
+    "lon": 72.8561
+   },
+   "bounds": {
+    "minlat": 19.1165,
+    "minlon": 72.8552,
+    "maxlat": 19.1179,
+    "maxlon": 72.857
+   },
+   "tags": {
+    "landuse": "construction",
+    "construction": "subway",
+    "name": "Metro Line 7A Gundavali station works"
+   }
+  },
+  {
+   "type": "way",
+   "id": 102,
+   "center": {
+    "lat": 19.1103,
+    "lon": 72.879
+   },
+   "bounds": {
+    "minlat": 19.1099,
+    "minlon": 72.8785,
+    "maxlat": 19.1107,
+    "maxlon": 72.8795
+   },
+   "tags": {
+    "building": "construction",
+    "construction": "apartments"
+   }
+  },
+  {
+   "type": "way",
+   "id": 103,
+   "center": {
+    "lat": 19.125,
+    "lon": 72.87
+   },
+   "bounds": {
+    "minlat": 19.12499,
+    "minlon": 72.86999,
+    "maxlat": 19.12501,
+    "maxlon": 72.87001
+   },
+   "tags": {
+    "landuse": "construction"
+   }
+  },
+  {
+   "type": "relation",
+   "id": 104,
+   "center": {
+    "lat": 19.099,
+    "lon": 72.867
+   },
+   "bounds": {
+    "minlat": 19.0975,
+    "minlon": 72.865,
+    "maxlat": 19.1005,
+    "maxlon": 72.869
+   },
+   "tags": {
+    "landuse": "construction",
+    "construction": "demolition",
+    "name": "Sahar village redevelopment"
+   }
+  },
+  {
+   "type": "way",
+   "id": 105,
+   "center": {
+    "lat": 19.1,
+    "lon": 72.86
+   },
+   "bounds": {
+    "minlat": 19.0,
+    "minlon": 72.7,
+    "maxlat": 19.2,
+    "maxlon": 73.0
+   },
+   "tags": {
+    "landuse": "construction",
+    "name": "Huge mapped zone"
+   }
+  }
+ ]
+}

@@ -26,7 +26,7 @@ export interface Run {
 export interface Ward { id: string; name: string; center_lat: number; center_lon: number; bbox: number[] }
 export interface FcPoint { ts: string; pm10: number; pm10_lo: number; pm10_hi: number; p_exceed: number }
 export interface ObsPoint { ts: string; pm10: number }
-export interface Site { id: string; name: string; activity: string; developer: string | null; lat: number; lon: number; sensor_status: string; demo: boolean; area_m2: number }
+export interface Site { id: string; name: string; activity: string; developer: string | null; lat: number; lon: number; sensor_status: string; demo: boolean; area_m2: number; source: string }
 export interface Receptor { id: string; name: string; kind: "school" | "hospital" | "housing"; lat: number; lon: number; population: number; source: string }
 export interface Station { id: string; name: string; source: string; lat: number; lon: number }
 export type TrustBand = "trusted" | "check" | "untrusted";
@@ -86,11 +86,11 @@ export async function getObserved(issuedAt: string, stationIds: string[] | undef
 }
 
 export async function getSites(): Promise<Site[]> {
-  return q<Site>("select id, name, activity, developer, lat, lon, sensor_status, demo, area_m2 from sites where ward_id=$1 order by id", [WARD]);
+  return q<Site>("select id, name, activity, developer, lat, lon, sensor_status, demo, area_m2, source from sites where ward_id=$1 order by demo, id", [WARD]);
 }
 
 export async function getSite(id: string): Promise<Site | null> {
-  const r = await q<Site>("select id, name, activity, developer, lat, lon, sensor_status, demo, area_m2 from sites where id=$1", [id]);
+  const r = await q<Site>("select id, name, activity, developer, lat, lon, sensor_status, demo, area_m2, source from sites where id=$1", [id]);
   return r[0] ?? null;
 }
 
@@ -159,13 +159,13 @@ export async function getAudits(runId: number, siteId?: string): Promise<Audit[]
 export interface RankRow {
   site_id: string; name: string; rank: number; score: number; reasons: string[];
   components: { upwind: number; trust: number; reports: number; unsensored: number; violations: number };
-  demo: boolean; lat: number; lon: number;
+  demo: boolean; source: string; lat: number; lon: number;
 }
 
 // The ranked "Inspect today" list (F4) for a run.
 export async function getRanking(runId: number): Promise<RankRow[]> {
   return q<RankRow>(
-    `select r.site_id, s.name, r.rank, r.score, r.reasons, r.components, s.demo, s.lat, s.lon
+    `select r.site_id, s.name, r.rank, r.score, r.reasons, r.components, s.demo, s.source, s.lat, s.lon
        from inspection_rank r join sites s on s.id = r.site_id where r.run_id=$1 order by r.rank`,
     [runId],
   );

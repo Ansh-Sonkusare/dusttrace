@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -58,6 +59,24 @@ def upsert_seed(conn: psycopg.Connection, seed: dict) -> None:
             )
     upsert_receptors(conn, [{**r, "source": "seed"} for r in seed["receptors"]], w["id"])
     conn.commit()
+
+
+def upsert_sites(conn, sites: list[dict], ward_id: str) -> int:
+    """Real construction sites (OSM, or satellite candidates an officer confirmed). Never demo.
+
+    Their monitor feed isn't connected, so sensor_status is 'not_connected'. A refresh updates the
+    name, shape and position but keeps any status an officer has set since.
+    """
+    for s in sites:
+        conn.execute(
+            """insert into sites (id, name, activity, developer, lat, lon, ward_id, area_m2, sensor_status, demo, source)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,'not_connected',false,%s)
+               on conflict (id) do update set name=excluded.name, activity=excluded.activity,
+               lat=excluded.lat, lon=excluded.lon, area_m2=excluded.area_m2, updated_at=now()""",
+            (s["id"], s["name"], s["activity"], s.get("developer"), s["lat"], s["lon"], ward_id,
+             s.get("area_m2", 5000), s.get("source", "osm")),
+        )
+    return len(sites)
 
 
 def upsert_station(conn, s: dict, ward_id: str) -> None:
@@ -184,11 +203,27 @@ def _f(v):
         return None
 
 
+def demo_sites() -> bool:
+    """Whether the run includes the demo sites. DUSTTRACE_DEMO_SITES=0 leaves only real ones."""
+    return os.environ.get("DUSTTRACE_DEMO_SITES", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def read_sites(conn, ward_id: str) -> pd.DataFrame:
+    """The ward's sites for a run, with whether each site's monitor status is known."""
+    df = read_frame(conn, """select s.id, s.name, s.activity, s.lat, s.lon, s.area_m2,
+                                    s.sensor_status <> 'not_connected' as sensor_known
+                               from sites s where s.ward_id=%s and (%s or not s.demo) order by s.id""",
+                    (ward_id, demo_sites()))
+    for c in ["lat", "lon", "area_m2"]:
+        df[c] = df[c].astype(float)
+    return df
+
+
 def read_sensor_specs(conn, ward_id: str) -> pd.DataFrame:
     return read_frame(conn, """select n.id as sensor_id, n.site_id, s.lat, s.lon, s.area_m2, s.activity,
                                       coalesce(n.injected_fault, 'none') as fault
                                  from site_sensors n join sites s on s.id = n.site_id
-                                where s.ward_id=%s order by n.id""", (ward_id,))
+                                where s.ward_id=%s and (%s or not s.demo) order by n.id""", (ward_id, demo_sites()))
 
 
 def write_site_readings(conn, df: pd.DataFrame) -> int:

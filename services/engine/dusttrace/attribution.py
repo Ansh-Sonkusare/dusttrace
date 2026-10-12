@@ -129,7 +129,7 @@ def rank(rows: list[dict], weights: dict = WEIGHTS) -> list[Ranked]:
             "upwind": weights["upwind"] * float(r.get("upwind") or 0),
             "trust": weights["trust"] * (1 - float(trust) / 100) if has and trust is not None else 0.0,
             "reports": weights["reports"] * min(reports / 3, 1),
-            "unsensored": weights["unsensored"] * (0.0 if has else 1.0),
+            "unsensored": weights["unsensored"] * (0.0 if has or not r.get("sensor_known", True) else 1.0),
             "violations": weights["violations"] * min(violations / 2, 1),
         }
         say = {

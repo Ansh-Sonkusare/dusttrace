@@ -90,3 +90,67 @@ def fetch(bbox: list[float], client: httpx.Client | None = None, sleep=time.slee
         except (httpx.HTTPError, ValueError) as e:
             last = e
     raise last  # type: ignore[misc]
+
+
+# ---------- construction sites (issue #30) ----------
+
+SITE_AREA = (1_000, 300_000)  # m2: smaller is noise, larger is a mapped zone, not a site
+
+
+def sites_query(bbox: list[float]) -> str:
+    min_lon, min_lat, max_lon, max_lat = bbox
+    b = f"{min_lat},{min_lon},{max_lat},{max_lon}"
+    return f"""
+[out:json][timeout:60];
+(
+  way["landuse"="construction"]({b});
+  relation["landuse"="construction"]({b});
+  way["building"="construction"]({b});
+);
+out center tags bb;
+"""
+
+
+def _activity(tags: dict) -> str:
+    kind = " ".join(str(tags.get(k, "")) for k in ("construction", "railway", "highway", "name")).lower()
+    if "demolition" in kind:
+        return "demolition"
+    if any(w in kind for w in ("subway", "metro", "railway", "rail", "tunnel", "highway", "road", "flyover", "bridge")):
+        return "excavation"
+    return "structure"
+
+
+def parse_sites(payload: dict) -> list[dict]:
+    out = []
+    for el in payload.get("elements") or []:
+        tags, c, b = el.get("tags") or {}, el.get("center") or {}, el.get("bounds") or {}
+        if not c or not b:
+            continue
+        h = (b["maxlat"] - b["minlat"]) * 111_320
+        w = (b["maxlon"] - b["minlon"]) * 111_320 * math.cos(math.radians(c["lat"]))
+        area = 0.7 * h * w  # mapped outlines fill about 70% of their bounding box
+        if not SITE_AREA[0] <= area <= SITE_AREA[1]:
+            continue
+        name = (tags.get("name") or "").strip()
+        out.append({
+            "id": f"osm-{el['type']}-{el['id']}",
+            "name": name or f"Construction site (OSM {el['type']} {el['id']})",
+            "activity": _activity(tags),
+            "developer": tags.get("operator") or tags.get("developer"),
+            "lat": float(c["lat"]), "lon": float(c["lon"]),
+            "area_m2": round(area),
+            "source": "osm", "demo": False,
+        })
+    return out
+
+
+def fetch_sites(bbox: list[float], client: httpx.Client | None = None, sleep=time.sleep) -> list[dict]:
+    c = client or httpx.Client(timeout=120)
+    last: Exception | None = None
+    for url in OVERPASS_URLS:
+        try:
+            r = http.post(c, url, data={"data": sites_query(bbox)}, tries=2, sleep=sleep)
+            return parse_sites(r.json())
+        except (httpx.HTTPError, ValueError) as e:
+            last = e
+    raise last  # type: ignore[misc]

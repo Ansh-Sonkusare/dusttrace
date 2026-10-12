@@ -61,3 +61,8 @@ def test_reasons_name_the_two_largest_components():
 def test_ranking_is_deterministic_on_ties():
     rows = [{"site_id": x, "name": x, "upwind": 0.2, "trust": 80, "has_sensor": True} for x in "CAB"]
     assert [r.site_id for r in attribution.rank(rows)] == ["A", "B", "C"]
+
+
+def test_unknown_monitor_is_not_counted_as_missing():
+    r = attribution.rank([{"site_id": "X", "name": "X", "upwind": 0, "trust": None, "has_sensor": False, "sensor_known": False}])[0]
+    assert r.components["unsensored"] == 0 and r.score == 0

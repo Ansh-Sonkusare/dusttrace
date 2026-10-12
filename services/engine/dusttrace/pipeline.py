@@ -139,6 +139,15 @@ def load_receptors_osm(conn, settings: Settings) -> int:
     return len(recs)
 
 
+def load_sites_osm(conn, settings: Settings) -> int:
+    """Construction sites mapped in OpenStreetMap inside the ward (issue #30). Real, not demo."""
+    seed = load_seed()
+    sites = overpass.fetch_sites(seed["ward"]["bbox"])
+    db.upsert_sites(conn, sites, seed["ward"]["id"])
+    conn.commit()
+    return len(sites)
+
+
 def run(conn, settings: Settings) -> dict:
     """Train, forecast 48 h, model plumes and issue Safe-Work Windows. Writes one `runs` row."""
     ward_id = settings.ward_id
@@ -182,18 +191,17 @@ def run(conn, settings: Settings) -> dict:
 
     ward_fc = fc[fc["station_id"] == "ward"].set_index("ts")["p_exceed"]
     future = wx[(wx["ts"] > t0) & (wx["ts"] <= t0 + pd.Timedelta(hours=settings.horizon_hours))]
-    sites = db.read_frame(conn, "select id, name, activity, lat, lon, area_m2 from sites where ward_id=%s", (ward_id,))
+    sites = db.read_sites(conn, ward_id)
     recs = db.read_receptors(conn, ward_id)
-    for c in ["lat", "lon", "area_m2"]:
-        sites[c] = sites[c].astype(float)
     for c in ["lat", "lon"]:
         recs[c] = recs[c].astype(float)
     hours = windows.evaluate(sites, recs, future, ward_fc, settings)
     db.write_site_hours(conn, run_id, hours)
     ranked = rank_sites(conn, ward_id, sites, list(active), future, ward_fc, audits)
     db.write_ranking(conn, run_id, ranked)
-    db.write_dust_scores(conn, run_id, score_sites(conn, ward_id, ranked, audits))
-    states = respond(conn, ward_id, run_id, now_hour(), hours, recs, ward_fc, audits, hot)
+    known = sites.set_index("id")["sensor_known"].to_dict()
+    db.write_dust_scores(conn, run_id, score_sites(conn, ward_id, ranked, audits, known))
+    states = respond(conn, ward_id, run_id, now_hour(), hours, recs, ward_fc, audits, hot, sites)
     db.write_alerts(conn, run_id, alerts.derive(states))
     conn.commit()
 
@@ -208,19 +216,20 @@ def rank_sites(conn, ward_id: str, sites: pd.DataFrame, station_ids: list[str], 
     """The ranked inspection list (F4) for the next 24 h of the forecast."""
     st = db.read_frame(conn, "select id, name, lat, lon from stations where id = any(%s)", (station_ids,))
     stations = [{"id": r.id, "name": r.name, "lat": float(r.lat), "lon": float(r.lon)} for r in st.itertuples()]
-    site_list = [{"id": r.id, "name": r.name, "lat": r.lat, "lon": r.lon} for r in sites.itertuples()]
+    site_list = [{"id": r.id, "name": r.name, "lat": r.lat, "lon": r.lon,
+                  "sensor_known": bool(getattr(r, "sensor_known", True))} for r in sites.itertuples()]
     up = attribution.upwind_details(site_list, stations, future.head(24), ward_p)
     trust = {a.site_id: a.score for a in audits}
     signals = db.site_signals(conn, ward_id)
     rows = [{"site_id": s["id"], "name": s["name"], "upwind": up[s["id"]]["exposure"],
              "upwind_station": up[s["id"]]["station"], "upwind_hours": up[s["id"]]["hours"],
-             "trust": trust.get(s["id"]), "has_sensor": s["id"] in trust,
+             "trust": trust.get(s["id"]), "has_sensor": s["id"] in trust, "sensor_known": s["sensor_known"],
              "reports": signals.get(s["id"], {}).get("reports", 0),
              "violations": signals.get(s["id"], {}).get("violations", 0)} for s in site_list]
     return attribution.rank(rows)
 
 
-def score_sites(conn, ward_id: str, ranked, audits) -> dict:
+def score_sites(conn, ward_id: str, ranked, audits, sensor_known: dict | None = None) -> dict:
     """Dust Score (F8) per site. Windows followed comes from accepted site-manager plans (F7)."""
     trust = {a.site_id: a.score for a in audits}
     signals = db.site_signals(conn, ward_id)
@@ -232,7 +241,8 @@ def score_sites(conn, ward_id: str, ranked, audits) -> dict:
         out[r.site_id] = dust_score.compute(
             trust=trust.get(r.site_id), has_sensor=r.site_id in trust, spike_hours=hours,
             windows_followed=followed.get(r.site_id), verified_reports=sig.get("verified_reports", 0),
-            violations=sig.get("violations_90d", 0))
+            violations=sig.get("violations_90d", 0),
+            sensor_known=bool((sensor_known or {}).get(r.site_id, True)))
     return out
 
 
@@ -254,7 +264,7 @@ def audit_sensors(conn, ward_id: str, rd: pd.DataFrame, wx: pd.DataFrame, t0: pd
 
 
 def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.DataFrame,
-            ward_p: pd.Series, audits, hot: dict) -> dict:
+            ward_p: pd.Series, audits, hot: dict, run_sites: pd.DataFrame | None = None) -> dict:
     """Dust Response Agent (F12): build each site's context from this run, let the policy engine
     decide, and update the site's open case. Returns each site's state for the ward alerts (F11)."""
     names = recs.set_index("id")["name"].to_dict()
@@ -263,6 +273,11 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
                                           coalesce(n.has_relay, false) as has_relay
                                      from sites s left join site_sensors n on n.site_id = s.id
                                     where s.ward_id=%s order by s.id""", (ward_id,))
+    if run_sites is not None:  # the sites this run covers (demo ones may be switched off)
+        known = run_sites.set_index("id")["sensor_known"].to_dict()
+        sites = sites[sites["id"].isin(known)]
+    else:
+        known = {}
     trust = {a.site_id: a.score for a in audits}
     signals = db.site_signals(conn, ward_id)
     accepted = db.plans_accepted_today(conn, ward_id)
@@ -274,6 +289,7 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
         ctx = agent.SiteContext(
             site_id=s.id, name=s.name, activity=s.activity, has_sensor=bool(s.has_sensor),
             has_relay=bool(s.has_relay), trust=trust.get(s.id), now=now,
+            sensor_known=bool(known.get(s.id, True)),
             spike_hours=[h.ts for h in spikes],
             spike_receptors=_unique(names[r] for h in spikes for r, _ in h.exposures),
             sensitive_avoid=_unique_pairs((h.ts, names[r]) for h in mine if h.status == "avoid" and h.sensitive_hit
