@@ -149,3 +149,14 @@ h1 { font: 600 30px/1.1 var(--f-ui); letter-spacing: -0.025em; margin: 0; }
 .grid-case { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
 @media (max-width: 1100px) { .grid-case { grid-template-columns: minmax(0, 1fr); } }
 .decide { display: flex; gap: 8px; margin-top: 8px; }
+
+/* Officer app: big tap targets on a phone */
+.officer .stop { list-style: none; }
+.outcome fieldset { border: 0; padding: 0; margin: 0 0 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.outcome legend { margin-bottom: 6px; }
+.choice { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: 12px; font-size: 14px; cursor: pointer; }
+.choice:has(input:checked) { border-color: var(--dust); background: var(--dust-tint); }
+.choice input { accent-color: var(--dust); }
+.outcome textarea { width: 100%; box-sizing: border-box; background: var(--sunk); color: var(--text); border: 1px solid var(--line-2); border-radius: 12px; padding: 10px 12px; font: 14px/1.4 var(--f-ui); margin-bottom: 10px; }
+.outcome .btn { min-height: 44px; padding: 10px 18px; }
+@media (max-width: 760px) { .outcome fieldset { grid-template-columns: minmax(0, 1fr); } }

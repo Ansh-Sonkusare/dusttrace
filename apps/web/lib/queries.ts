@@ -192,3 +192,23 @@ export async function getOpenCases(): Promise<CaseRow[]> {
   );
   return rows.map((r) => ({ ...r, opened_at: iso(r.opened_at), updated_at: iso(r.updated_at) }));
 }
+
+export interface Inspection { id: number; site_id: string; site_name: string; outcome: string; note: string | null; officer: string | null; at: string }
+
+export async function getRecentInspections(limit = 10): Promise<Inspection[]> {
+  const r = await q<Inspection>(
+    `select i.id, i.site_id, s.name as site_name, i.outcome, i.note, i.officer, i.at
+       from inspections i join sites s on s.id = i.site_id where s.ward_id=$1 order by i.at desc limit $2`,
+    [WARD, limit],
+  );
+  return r.map((x) => ({ ...x, at: iso(x.at) }));
+}
+
+// Actions on each site's open case that wait on the ward officer (route L1).
+export async function getOfficerActions(): Promise<{ site_id: string; action: string; rule: string; status: string }[]> {
+  return q(
+    `select c.site_id, a.action, a.rule, a.status from case_actions a join cases c on c.id = a.case_id
+      where c.closed_at is null and a.phase='final' and a.route='L1' and a.status in ('proposed','approved','requested')
+      order by c.site_id, a.id`,
+  );
+}

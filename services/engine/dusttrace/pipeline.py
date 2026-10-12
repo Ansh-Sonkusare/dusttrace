@@ -179,7 +179,8 @@ def rank_sites(conn, ward_id: str, sites: pd.DataFrame, station_ids: list[str], 
     rows = [{"site_id": s["id"], "name": s["name"], "upwind": up[s["id"]]["exposure"],
              "upwind_station": up[s["id"]]["station"], "upwind_hours": up[s["id"]]["hours"],
              "trust": trust.get(s["id"]), "has_sensor": s["id"] in trust,
-             **signals.get(s["id"], {})} for s in site_list]
+             "reports": signals.get(s["id"], {}).get("reports", 0),
+             "violations": signals.get(s["id"], {}).get("violations", 0)} for s in site_list]
     return attribution.rank(rows)
 
 
@@ -226,7 +227,8 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
                                           for r, c in h.exposures if kinds.get(r) in ("school", "hospital")),
             sensor_hot_hours=hot.get(s.id, 0),
             pending_requests=db.pending_requests(conn, s.id),
-            **signals.get(s.id, {}),
+            citizen_reports=signals.get(s.id, {}).get("reports", 0),
+            confirmed_violation=signals.get(s.id, {}).get("confirmed_violation", False),
         )
         decision = agent.decide(ctx)
         states[s.id] = db.write_case(conn, run_id, s.id, decision)
