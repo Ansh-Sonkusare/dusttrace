@@ -13,7 +13,8 @@ Start with `HANDOFF.md` (context, status, next steps) and `docs/design-system.md
 - Engine tests: `cd services/engine && pytest -q`. Database tests need `TEST_DATABASE_URL` (Postgres + PostGIS; the tests wipe it) and run in CI against a PostGIS service.
 - Work is tracked as GitHub issues; write the test first, one PR per issue.
 - Full local run: `python -m dusttrace all` (needs `DATABASE_URL`; default `postgresql://postgres@localhost:5432/dusttrace`)
-- Web: `cd apps/web && npm run typecheck && npm run build`; dev server `npm run dev`
+- Web: `cd apps/web && npm run typecheck && npm test && npm run build`; dev server `npm run dev`. Unit tests (Vitest) cover the pure logic in `lib/`; keep server code thin around it.
+- The console sits behind `DUSTTRACE_PASSWORD` (HTTP Basic, `proxy.ts`); without it, production returns 503. `/s/…`, `/plan/…` and `/api/report` stay public.
 - `predev`/`prebuild` copy the MapLibre worker into `public/maplibre/` (MapLibre can't find its worker under the Next bundler). Don't remove it.
 
 ## Conventions

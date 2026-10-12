@@ -215,9 +215,14 @@ def write_audits(conn, run_id: int, results) -> None:
 
 
 def site_signals(conn, ward_id: str) -> dict:
-    """Citizen reports and confirmed violations per site, for the priority score. Empty until those
-    tables exist (issues #7, #8)."""
-    return {}
+    """Per site: citizen reports in 7 days, confirmed violations in 30 days, and whether an officer
+    confirmed one in the last 7 days. Citizen reports arrive with #8."""
+    rows = conn.execute("""select s.id,
+                                  count(i.*) filter (where i.outcome='violation' and i.at > now() - interval '30 days'),
+                                  count(i.*) filter (where i.outcome='violation' and i.at > now() - interval '7 days')
+                             from sites s left join inspections i on i.site_id = s.id
+                            where s.ward_id=%s group by s.id""", (ward_id,)).fetchall()
+    return {r[0]: {"reports": 0, "violations": int(r[1]), "confirmed_violation": r[2] > 0} for r in rows}
 
 
 def write_ranking(conn, run_id: int, ranked) -> None:

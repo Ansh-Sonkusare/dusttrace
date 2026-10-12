@@ -122,7 +122,7 @@ Use at least 420 days of history. With 120 days the holdout crosses a season cha
    - The scheduled hourly run uses the workflow on `main`. The secret-check fix (`working-directory: .` on the gate step) must be on `main` or every scheduled run fails at its first step.
    - The workflow runs `init-db` before `ingest` and `run`, so new migrations reach Supabase on the next hourly run. Keep every migration safe to re-run, and give every new table `enable row level security`.
 2. **Verify live data:** weather and OpenAQ station history are verified (see above). Still to do: watch for OpenAQ's CPCB feed to resume and the run's `data_mode` to turn `live`; if it stays stale, add CPCB's own real-time feed (data.gov.in) as a second source. Then run `dusttrace osm` for real schools and hospitals.
-3. **Deploy the console** on Vercel, root `apps/web`, env `DATABASE_URL`. Add a basic password, because ward data is sensitive.
+3. **Deploy the console** on Vercel, root `apps/web`, env `DATABASE_URL` and `DUSTTRACE_PASSWORD` (the console returns 503 in production without it). Officers use `/officer` on their phones; outcomes feed the next run's ranking (past violations) and the agent (D8/D9).
 4. **Calibrate:** compare plume increments with station deltas downwind of real sites, tune the emission factors, and reach about 80% coverage for the quantile band.
 5. **Agent cases (PRD D1–D10):** the inspection case builder ranks sites, checks the sensor, satellite and bus evidence, proposes actions, and needs an officer's sign-off.
 6. **Site-manager view:** a mobile web page that takes tomorrow's windows from `/api/run`, with an "Accept plan" button.

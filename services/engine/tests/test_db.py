@@ -147,3 +147,23 @@ def test_unanswered_request_escalates_under_d7(conn, settings):
     assert d[("REQUEST_SPOT_CHECK", "D1")] == "expired" and d[("ADD_TO_INSPECTION", "D7")] == "proposed"
     note = one(conn, "select what_changed from cases where site_id='D' and closed_at is null")[0]
     assert "none was assumed" in note
+
+
+def test_confirmed_violations_raise_priority_and_reach_the_agent(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    first = pipeline.run(conn, settings)
+    before = one(conn, "select components->>'violations' from inspection_rank where run_id=%s and site_id='A'",
+                 (first["run_id"],))[0]
+    assert float(before) == 0
+    conn.execute("insert into inspections (site_id, outcome, note, officer) values ('A','violation','dry cutting','test')")
+    conn.execute("insert into inspections (site_id, outcome, officer) values ('B','compliant','test')")
+    conn.commit()
+    assert db.site_signals(conn, "K-East")["A"] == {"reports": 0, "violations": 1, "confirmed_violation": True}
+    assert db.site_signals(conn, "K-East")["B"]["violations"] == 0
+    second = pipeline.run(conn, settings)
+    after = one(conn, "select components->>'violations', reasons from inspection_rank where run_id=%s and site_id='A'",
+                (second["run_id"],))
+    assert float(after[0]) > 0
+    # A's case now counts the officer's finding as evidence
+    sig = one(conn, "select signals from cases where site_id='A' and closed_at is null")
+    assert sig is None or "officer inspection" in sig[0]
