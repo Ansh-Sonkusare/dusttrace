@@ -446,8 +446,12 @@ def verify_actions(conn, ward_id: str, now: pd.Timestamp) -> dict:
                             where s.ward_id=%s and c.closed_at is null and a.phase='final'
                               and a.status in ('done', 'sent', 'approved') and a.action = any(%s)
                               and coalesce(a.at, a.created_at) + make_interval(hours => %s) <= %s
-                              and not exists (select 1 from verifications v where v.action_id = a.id)""",
-                        (ward_id, list(VERIFY_ACTIONS), effect.WINDOW_H, now.to_pydatetime())).fetchall()
+                              and not exists (select 1 from verifications v where v.action_id = a.id and (
+                                    v.verdict <> 'insufficient'                  -- settled
+                                    or v.checked_at > %s - interval '6 hours'    -- retried at most every 6 h ...
+                                    or v.window_end < %s - interval '3 days'))   -- ... for 3 days, while the feed backfills""",
+                        (ward_id, list(VERIFY_ACTIONS), effect.WINDOW_H, now.to_pydatetime(), now.to_pydatetime(),
+                         now.to_pydatetime())).fetchall()
     counts = {"checked": 0, "drop": 0, "no_drop": 0, "insufficient": 0}
     if not todo:
         return counts
@@ -477,9 +481,14 @@ def verify_actions(conn, ward_id: str, now: pd.Timestamp) -> dict:
             res = effect.assess(pm.set_index("ts")["pm10"].astype(float), wind, (start, end))
             res["note"] = f"{pick[1]}: {res['note']}"
         conn.execute("""insert into verifications (action_id, case_id, site_id, action, station_id, window_start, window_end,
-                        during, baseline, change_pct, days, verdict, note) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        during, baseline, change_pct, days, verdict, note, checked_at)
+                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        on conflict (action_id) do update set station_id=excluded.station_id, during=excluded.during,
+                        baseline=excluded.baseline, change_pct=excluded.change_pct, days=excluded.days,
+                        verdict=excluded.verdict, note=excluded.note, checked_at=excluded.checked_at""",
                      (aid, cid, site_id, action, pick[0] if pick else None, start.to_pydatetime(), end.to_pydatetime(),
-                      res["during"], res["baseline"], res["change_pct"], res["days"], res["verdict"], res["note"]))
+                      res["during"], res["baseline"], res["change_pct"], res["days"], res["verdict"], res["note"],
+                      now.to_pydatetime()))
         if res["verdict"] == "drop":
             conn.execute("""update cases set state='DONE', closed_at=now(), updated_at=now(), stop_reason=%s
                             where id=%s and closed_at is null""",

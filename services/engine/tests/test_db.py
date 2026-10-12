@@ -444,3 +444,21 @@ def test_runs_use_the_cams_features_when_cams_is_stored(conn, settings, monkeypa
     monkeypatch.setenv("DUSTTRACE_CAMS_FEATURES", "0")
     out = pipeline.run(conn, settings)
     assert not one(conn, "select model from runs where id=%s", (out["run_id"],))[0].endswith("+cams")
+
+
+def test_an_insufficient_check_is_retried_when_the_feed_backfills(conn, settings):
+    now = pipeline.now_hour()
+    cid, aid = _case_with_mist(conn, now - pd.Timedelta(hours=8))
+    _downwind_station(conn, now, during=55.0)
+    window = conn.execute("""select ts, pm10 from readings where station_id='openaq-11' and ts >= %s and ts < %s""",
+                          ((now - pd.Timedelta(hours=8)).to_pydatetime(), (now - pd.Timedelta(hours=2)).to_pydatetime())).fetchall()
+    conn.execute("delete from readings where station_id='openaq-11' and ts >= %s", ((now - pd.Timedelta(hours=8)).to_pydatetime(),))
+    conn.commit()
+    assert pipeline.verify_actions(conn, "K-East", now)["insufficient"] == 1
+    assert pipeline.verify_actions(conn, "K-East", now + pd.Timedelta(hours=1))["checked"] == 0  # not again within 6 h
+    with conn.cursor() as cur:  # CPCB backfills the outage
+        cur.executemany("insert into readings (station_id, ts, pm10, synthetic) values ('openaq-11', %s, %s, false)", window)
+    conn.commit()
+    out = pipeline.verify_actions(conn, "K-East", now + pd.Timedelta(hours=7))
+    assert out["drop"] == 1
+    assert one(conn, "select count(*), max(verdict) from verifications where action_id=%s", (aid,)) == (1, "drop")
