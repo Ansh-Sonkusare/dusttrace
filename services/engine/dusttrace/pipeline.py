@@ -134,6 +134,8 @@ def run(conn, settings: Settings) -> dict:
     wx["ts"] = pd.to_datetime(wx["ts"], utc=True)
     rd["ts"] = pd.to_datetime(rd["ts"], utc=True)
 
+    real_ts = rd.loc[~rd["synthetic"].astype(bool) & rd["pm10"].notna(), "ts"]
+    newest_real = real_ts.max().isoformat() if len(real_ts) else None  # shown when the live feed lags
     t0, active = anchor(rd, now_hour())
     rd = rd[rd["station_id"].isin(active)]
 
@@ -142,7 +144,7 @@ def run(conn, settings: Settings) -> dict:
 
     data_mode = _mode(wx["synthetic"].any(), wx["synthetic"].all(), rd["synthetic"].any(), rd["synthetic"].all())
     audits, bench, hot = audit_sensors(conn, ward_id, rd, wx, t0)
-    metrics = {**model.metrics, "stations": list(active), "audit": bench}
+    metrics = {**model.metrics, "stations": list(active), "audit": bench, "newest_real_reading": newest_real}
     run_id = db.create_run(conn, ward_id, t0.to_pydatetime(), data_mode, "lightgbm-direct-v1", metrics)
     db.write_forecasts(conn, run_id, fc)
     db.write_audits(conn, run_id, audits)

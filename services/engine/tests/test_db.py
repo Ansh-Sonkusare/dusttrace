@@ -232,3 +232,12 @@ def test_backtest_uses_only_real_stations_when_there_are_some(conn, settings):
     out = pipeline.backtest(conn, settings, days=10)
     assert out["stations"] == ["openaq-9"]
     assert out["data_mode"] == "mixed"  # real readings, synthetic weather
+
+
+def test_run_records_when_real_station_data_stops(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    assert pipeline.run(conn, settings)["metrics"]["newest_real_reading"] is None
+    _real_station(conn, hours_ago_newest=96)
+    out = pipeline.run(conn, settings)
+    newest = pd.Timestamp(out["metrics"]["newest_real_reading"])
+    assert newest == pipeline.now_hour() - pd.Timedelta(hours=96)

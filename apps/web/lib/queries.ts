@@ -18,6 +18,7 @@ export interface Run {
     train_rows?: number;
     stations?: string[];
     audit?: { n: number; precision: number; recall: number; detected?: Record<string, number> };
+    newest_real_reading?: string | null;
   };
 }
 
