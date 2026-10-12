@@ -68,6 +68,7 @@ class SiteContext:
     ignored_windows: int = 0           # Avoid windows the site didn't follow
     confirmed_violation: bool = False  # an officer confirmed a violation (inspection outcome)
     non_construction: bool = False     # evidence points to a non-construction source
+    satellite_active: bool = False     # Sentinel-2 shows new bare ground at the site (F2)
     pending_requests: list = field(default_factory=list)  # {"action", "deadline"} not yet answered
 
 
@@ -150,6 +151,8 @@ def signals(c: SiteContext) -> list[str]:
         s.append("ignored Safe-Work Windows")
     if c.confirmed_violation:
         s.append("officer inspection")
+    if c.satellite_active:
+        s.append("satellite change")
     if not c.has_sensor:
         s.append("site registry")
     return s

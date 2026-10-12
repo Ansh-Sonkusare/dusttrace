@@ -251,6 +251,7 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
             pending_requests=db.pending_requests(conn, s.id),
             citizen_reports=signals.get(s.id, {}).get("reports", 0),
             confirmed_violation=signals.get(s.id, {}).get("confirmed_violation", False),
+            satellite_active=signals.get(s.id, {}).get("satellite", False),
         )
         decision = agent.decide(ctx)
         case_id = db.write_case(conn, run_id, s.id, decision)
@@ -291,6 +292,25 @@ def backtest(conn, settings: Settings, days: int = 60) -> dict:
     conn.commit()
     return {"id": row[0], "data_mode": mode, "stations": res.stations, "origins": res.origins,
             "metrics": res.metrics, "spike_day": res.spike_day}
+
+
+def discover_sites(conn, settings: Settings, months_back: int = 12) -> dict:
+    """Sentinel-2 change over the ward (F2): the clearest dry-season scene this year against the same
+    months a year earlier. Stores the candidates; matched ones count as a signal for the agent."""
+    from . import discover
+
+    seed = load_seed()
+    sites = [{"id": r.id, "lat": float(r.lat), "lon": float(r.lon)} for r in
+             db.read_frame(conn, "select id, lat, lon from sites where ward_id=%s", (settings.ward_id,)).itertuples()]
+    now = pd.Timestamp.now(tz="UTC")
+    year = now.year if now.month >= 6 else now.year - 1  # the latest finished dry season (Jan-May)
+    after = (f"{year}-01-01T00:00:00Z", f"{year}-05-31T00:00:00Z")
+    before = (f"{year - months_back // 12}-01-01T00:00:00Z", f"{year - months_back // 12}-05-31T00:00:00Z") \
+        if months_back >= 12 else after
+    res = discover.discover(seed["ward"]["bbox"], sites, after, before)
+    n = db.write_candidates(conn, settings.ward_id, res["before"], res["after"], res["candidates"])
+    return {"before": res["before"], "after": res["after"], "candidates": n,
+            "matched": sorted({c["site_id"] for c in res["candidates"] if c["site_id"]})}
 
 
 def plume_hour(ts) -> float:

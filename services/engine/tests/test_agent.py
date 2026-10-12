@@ -121,3 +121,10 @@ def test_hypotheses_are_probabilities():
     d = agent.decide(ctx(trust=30.0, spike_hours=SPIKE, spike_receptors=["School"]))
     assert abs(sum(p for _, p in d.hypotheses) - 1) < 0.005  # rounded to 3 dp
     assert d.hypotheses == sorted(d.hypotheses, key=lambda h: -h[1])
+
+
+def test_d6_satellite_change_is_a_second_signal_for_an_unsensored_site():
+    d = agent.decide(ctx(site_id="D", has_sensor=False, has_relay=False, trust=None, satellite_active=True))
+    acts = actions(d)
+    assert "satellite change" in d.signals
+    assert acts["REGISTER_UNSENSORED_SITE"].rule == "D6" and "REQUEST_SPOT_CHECK" not in acts

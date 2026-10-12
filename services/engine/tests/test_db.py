@@ -241,3 +241,17 @@ def test_run_records_when_real_station_data_stops(conn, settings):
     out = pipeline.run(conn, settings)
     newest = pd.Timestamp(out["metrics"]["newest_real_reading"])
     assert newest == pipeline.now_hour() - pd.Timedelta(hours=96)
+
+
+def test_satellite_candidates_are_stored_and_reach_the_agent(conn, settings):
+    cands = [{"lat": 19.1255, "lon": 72.8750, "area_m2": 9000, "site_id": "D"},
+             {"lat": 19.1350, "lon": 72.8880, "area_m2": 16000, "site_id": None}]
+    db.write_candidates(conn, "K-East", "S2_before", "S2_after", cands)
+    db.write_candidates(conn, "K-East", "S2_before", "S2_after", cands)  # re-running replaces, not duplicates
+    assert one(conn, "select count(*) from site_candidates")[0] == 2
+    assert db.site_signals(conn, "K-East")["D"]["satellite"] is True
+    assert db.site_signals(conn, "K-East")["A"]["satellite"] is False
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    pipeline.run(conn, settings)
+    acts = _case_actions(conn, "D")
+    assert ("REGISTER_UNSENSORED_SITE", "D6") in acts and ("REQUEST_SPOT_CHECK", "D1") not in acts
