@@ -1,0 +1,29 @@
+name: Back-test
+
+# Replays the last N days of real station data with only the past visible (PRD F3 evidence).
+# Run by hand; results land in the backtests table and on the console's Forecast page.
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days to replay"
+        default: "60"
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    defaults:
+      run:
+        working-directory: services/engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - run: python -m dusttrace init-db && python -m dusttrace backtest --days "${{ inputs.days || '60' }}"

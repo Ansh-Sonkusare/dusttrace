@@ -1,8 +1,8 @@
 import TopBar from "@/components/TopBar";
 import ForecastChart from "@/components/ForecastChart";
 import NoRun from "@/components/Empty";
-import { getLatestRun, getObserved, getStationPeaks, getWard, getWardForecast } from "@/lib/queries";
-import { dayHour } from "@/lib/format";
+import { getLatestBacktest, getLatestRun, getObserved, getStationPeaks, getWard, getWardForecast } from "@/lib/queries";
+import { dayHour, dayShort } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ const n = (v: number | undefined, d = 1) => (v === undefined ? "–" : v.toFixed
 export default async function ForecastPage() {
   const [ward, run] = await Promise.all([getWard(), getLatestRun()]);
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
-  const [fc, obs, peaks] = await Promise.all([getWardForecast(run.id), getObserved(run.issued_at, run.metrics.stations), getStationPeaks(run.id)]);
+  const [fc, obs, peaks, bt] = await Promise.all([getWardForecast(run.id), getObserved(run.issued_at, run.metrics.stations), getStationPeaks(run.id), getLatestBacktest()]);
   const m = run.metrics;
 
   return (
@@ -52,6 +52,40 @@ export default async function ForecastPage() {
             </div>
           </section>
         </div>
+        {bt && (
+          <section className="panel">
+            <div className="ph">
+              <h2>Back-test on {bt.data_mode === "synthetic" ? "synthetic" : "real CPCB"} data</h2>
+              <span className="meta">{bt.stations.length} stations · {bt.origins} daily forecasts, {dayShort(bt.train_end)} to {dayShort(bt.test_end)}{bt.data_mode !== "live" && <> · <span className="pill dust">{bt.data_mode === "synthetic" ? "Synthetic" : "Partly synthetic weather"}</span></>}</span>
+            </div>
+            <div className="pb grid-case">
+              <table className="tbl">
+                <thead><tr><th>Hours ahead</th><th>Model error</th><th>Persistence error</th><th>F1 above 100</th><th>Inside likely range</th></tr></thead>
+                <tbody>
+                  {Object.entries(bt.metrics).map(([k, b]) => (
+                    <tr key={k}><td>{k}</td><td className="tab">{n(b.mae_model)} µg/m³</td><td className="tab">{n(b.mae_persistence)} µg/m³</td>
+                      <td className="tab">{n(b.f1_exceed_model, 2)} <span className="muted">vs {n(b.f1_exceed_persistence, 2)}</span></td>
+                      <td className="tab">{Math.round(b.coverage_10_90 * 100)}%</td></tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="small">
+                {bt.spike_day && (
+                  <>
+                    <p style={{ margin: "0 0 6px" }}><b>Worst day: {dayShort(`${bt.spike_day.day}T12:00:00+05:30`)}</b></p>
+                    <p className="muted" style={{ margin: "0 0 12px" }}>
+                      Ward average {Math.round(bt.spike_day.actual_mean)} µg/m³.
+                      {bt.spike_day.lead_hours != null && bt.spike_day.p_exceed_max != null
+                        ? ` The forecast issued ${bt.spike_day.lead_hours} hours earlier gave a ${Math.round(bt.spike_day.p_exceed_max * 100)}% chance of going above 100${bt.spike_day.flagged ? ", so it was flagged." : ", below the 50% flag."}`
+                        : " No forecast was issued early enough to judge."}
+                    </p>
+                  </>
+                )}
+                <p className="muted" style={{ margin: 0 }}>Each forecast saw only data up to its issue time; the model was trained on earlier months. {bt.note}</p>
+              </div>
+            </div>
+          </section>
+        )}
       </main>
     </>
   );

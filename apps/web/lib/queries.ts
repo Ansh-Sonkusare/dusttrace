@@ -272,3 +272,18 @@ export async function getKpis(run: Run): Promise<import("./kpi").KpiRaw> {
   return { spike_p_tomorrow: x.spike == null ? null : Number(x.spike), sites_holding: x.holding, untrusted: x.untrusted,
            decisions: x.decisions, new_reports: x.reports };
 }
+
+type BtBucket = { n: number; mae_model: number; mae_persistence: number; f1_exceed_model: number; f1_exceed_persistence: number; coverage_10_90: number; exceed_rate: number };
+export interface Backtest {
+  id: number; created_at: string; data_mode: string; stations: string[]; train_end: string; test_end: string; origins: number;
+  metrics: Record<string, BtBucket>;
+  spike_day: { day: string; actual_mean: number; issued_at: string | null; lead_hours?: number; forecast_mean?: number; p_exceed_max?: number; flagged?: boolean } | null;
+  note: string | null;
+}
+
+export async function getLatestBacktest(): Promise<Backtest | null> {
+  const r = await q<Backtest>(
+    `select id, created_at, data_mode, stations, train_end, test_end, origins, metrics, spike_day, note
+       from backtests where ward_id=$1 order by created_at desc limit 1`, [WARD]);
+  return r[0] ? { ...r[0], created_at: iso(r[0].created_at), train_end: iso(r[0].train_end), test_end: iso(r[0].test_end) } : null;
+}

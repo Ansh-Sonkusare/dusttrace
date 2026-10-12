@@ -1,5 +1,6 @@
 """Database integration tests. They need TEST_DATABASE_URL (Postgres + PostGIS) and skip without it."""
 
+import numpy as np
 import pandas as pd
 
 from dusttrace import db, pipeline
@@ -211,3 +212,23 @@ def test_run_logs_ward_alerts_with_actions(conn, settings):
     sensor = [r for r in rows if r[0] == "sensor"]
     assert [r[1] for r in sensor] == ["C"] and sensor[0][2] is not None and sensor[0][4]
     assert all(r[4] for r in rows)
+
+
+def test_backtest_is_stored_and_labelled(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=90)
+    out = pipeline.backtest(conn, settings, days=10)
+    row = one(conn, "select data_mode, origins, metrics, stations from backtests where id=%s", (out["id"],))
+    assert row[0] == "synthetic"          # no real readings in this database
+    assert row[1] >= 7 and "1-24" in row[2] and row[3]
+
+
+
+def test_backtest_uses_only_real_stations_when_there_are_some(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=90)
+    db.upsert_station(conn, {"id": "openaq-9", "name": "Real", "source": "openaq", "lat": 19.11, "lon": 72.86}, "K-East")
+    ts = pd.date_range(end=pipeline.now_hour(), periods=24 * 80, freq="h", tz="UTC")
+    wave = 80 + 30 * np.sin(np.arange(len(ts)) / 24 * 2 * np.pi)
+    db.write_readings(conn, pd.DataFrame({"station_id": "openaq-9", "ts": ts, "pm10": wave, "pm25": None}), synthetic=False)
+    out = pipeline.backtest(conn, settings, days=10)
+    assert out["stations"] == ["openaq-9"]
+    assert out["data_mode"] == "mixed"  # real readings, synthetic weather

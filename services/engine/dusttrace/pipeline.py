@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import timedelta
 
 import pandas as pd
 
-from . import agent, alerts, attribution, audit, db, dust_score, forecast, windows
+from . import agent, alerts, attribution, audit, backtest as bt, db, dust_score, forecast, windows
 from .config import Settings, load_seed
 from .sources import openaq, openmeteo, overpass, synthetic
 
@@ -255,6 +256,39 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
         states.append(alerts.SiteState(ctx, decision, case_id, s.id in accepted,
                                        avoid_now=first is not None and first.status == "avoid"))
     return states
+
+
+def backtest(conn, settings: Settings, days: int = 60) -> dict:
+    """Back-test the forecast over the last `days` days of data (F3). Uses only real station readings
+    when there are any, so the report's numbers are real; otherwise synthetic, and labelled so."""
+    wx = db.read_frame(conn, "select ts, wind_speed, wind_dir, blh, temp, rh, precip, synthetic from weather_hourly where ward_id=%s order by ts", (settings.ward_id,))
+    rd = db.read_frame(conn, """select r.station_id, r.ts, r.pm10, r.synthetic from readings r
+                                join stations s on s.id = r.station_id where s.ward_id=%s and r.pm10 is not null
+                                order by r.ts""", (settings.ward_id,))
+    for c in ["wind_speed", "wind_dir", "blh", "temp", "rh", "precip"]:
+        wx[c] = wx[c].astype(float)
+    wx["ts"] = pd.to_datetime(wx["ts"], utc=True)
+    rd["ts"] = pd.to_datetime(rd["ts"], utc=True)
+    rd["pm10"] = rd["pm10"].astype(float)
+    real = rd[~rd["synthetic"].astype(bool)]
+    is_real = not real.empty
+    use = real if is_real else rd
+    # Stations with enough history to learn from (at least 60 days of hours).
+    counts = use.groupby("station_id")["pm10"].count()
+    use = use[use["station_id"].isin(counts[counts >= 24 * 60].index)]
+    end = use["ts"].max().floor("D")
+    start = end - pd.Timedelta(days=days)
+    res = bt.run(use[["station_id", "ts", "pm10"]], wx, start, end, settings.horizon_hours, 24, settings.exceed_threshold)
+    wx_used = wx[(wx["ts"] >= use["ts"].min()) & (wx["ts"] <= end)]
+    mode = ("live" if not wx_used["synthetic"].any() else "mixed") if is_real else "synthetic"
+    row = conn.execute(
+        """insert into backtests (ward_id, data_mode, stations, train_end, test_end, origins, metrics, spike_day, note)
+           values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+        (settings.ward_id, mode, res.stations, res.train_end.to_pydatetime(), res.test_end.to_pydatetime(), res.origins,
+         json.dumps(res.metrics), json.dumps(res.spike_day) if res.spike_day else None, res.note)).fetchone()
+    conn.commit()
+    return {"id": row[0], "data_mode": mode, "stations": res.stations, "origins": res.origins,
+            "metrics": res.metrics, "spike_day": res.spike_day}
 
 
 def plume_hour(ts) -> float:
