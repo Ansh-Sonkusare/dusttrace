@@ -111,6 +111,7 @@ function Sources({ chk }: { chk: Chk }) {
   const rows: [string, string, string, boolean][] = [
     ["Weather", "Open-Meteo forecast", `${pct(s.weather_live)} of the forecast hours live`, s.weather_live >= 1],
     ["Schools and hospitals", "OpenStreetMap", s.receptors_osm ? `${s.receptors_osm} loaded` : "Demo positions only", s.receptors_osm > 0],
+    ["Homes", "Census 2011 people over OpenStreetMap residential land", s.housing_osm ? `${s.housing_osm} areas, estimated` : "Demo points only", (s.housing_osm ?? 0) > 0],
     ["Construction sites", "OpenStreetMap and confirmed satellite finds", s.sites_real ? `${s.sites_real} real sites` : "Demo sites only", s.sites_real > 0],
     ["Site discovery", "Sentinel-2", s.satellite_scene ? `Latest scene ${sceneDate(s.satellite_scene)}` : "Not run yet", !!s.satellite_scene],
   ];

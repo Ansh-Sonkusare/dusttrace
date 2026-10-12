@@ -12,7 +12,7 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 
 from . import agent, alerts, attribution, audit, backtest as bt, db, dust_score, fill, forecast, windows
-from . import verify as verify_mod
+from . import housing, verify as verify_mod
 from .config import Settings, load_seed
 from .sources import cams, ohsome, openaq, openmeteo, overpass, synthetic
 
@@ -143,13 +143,37 @@ def load_receptors_osm(conn, settings: Settings) -> int:
     return len(recs)
 
 
+def load_housing_osm(conn, settings: Settings) -> dict:
+    """Real housing exposure (issue #31): Census 2011 people spread over OSM residential land,
+    one receptor per ~250 m cell with homes in it."""
+    seed = load_seed()
+    ward_id, ward_bbox = seed["ward"]["id"], seed["ward"]["bbox"]
+    cells = housing.grid(receptor_bbox(ward_bbox))
+    areas = ohsome.area_by_cell(cells)
+    ward_cells = housing.in_box(cells, ward_bbox)
+    ward_area = sum(areas.get(c["id"], 0.0) for c in ward_cells)
+    census = housing.CENSUS_2011[ward_id]
+    density = housing.people_per_m2(census, ward_area)
+    recs = housing.receptors(cells, areas, density)
+    db.replace_osm_housing(conn, recs, ward_id)
+    conn.commit()
+    in_ward = {f"res-{c['id']}" for c in ward_cells}
+    return {"receptors": len(recs), "residential_km2": round(ward_area / 1e6, 2),
+            "people_per_km2_of_homes": round(density * 1e6), "census_2011": census,
+            "population_in_ward": sum(r["population"] for r in recs if r["id"] in in_ward),
+            "population_total": sum(r["population"] for r in recs)}
+
+
 def fetch_osm_sites(bbox: list[float]) -> tuple[list[dict], str]:
     """Construction sites from Overpass, or from the ohsome snapshot when every mirror is down."""
     try:
-        return overpass.fetch_sites(bbox), "overpass"
+        sites = overpass.fetch_sites(bbox)
+        if sites:
+            return sites, "overpass"
+        log.warning("Overpass returned no construction sites; checking the ohsome snapshot")
     except (httpx.HTTPError, ValueError) as e:
         log.warning("Overpass unavailable (%s); using the ohsome snapshot", e)
-        return ohsome.fetch_sites(bbox), "ohsome"
+    return ohsome.fetch_sites(bbox), "ohsome"
 
 
 def load_sites_osm(conn, settings: Settings) -> int:
@@ -360,12 +384,15 @@ def verify(conn, settings: Settings) -> dict:
                                where ward_id=%s and ts > %s and ts <= %s""",
                            (ward_id, issued, issued + pd.Timedelta(hours=settings.horizon_hours))).fetchone()
     weather_live = round(horizon[1] / horizon[0], 4) if horizon[0] else 0.0
-    receptors_osm = conn.execute("select count(*) from receptors where ward_id=%s and source='osm'", (ward_id,)).fetchone()[0]
+    receptors_osm = conn.execute("""select count(*) from receptors where ward_id=%s and source='osm'
+                                      and kind in ('school', 'hospital')""", (ward_id,)).fetchone()[0]
+    housing_osm = conn.execute("select count(*) from receptors where ward_id=%s and source='osm' and kind='housing'",
+                               (ward_id,)).fetchone()[0]
     sites_real = conn.execute("select count(*) from sites where ward_id=%s and not demo", (ward_id,)).fetchone()[0]
     scene = conn.execute("select max(scene_after), max(found_at) from site_candidates where ward_id=%s", (ward_id,)).fetchone()
     shares = metrics.get("inputs") or {"hours": 0, "real": 0.0, "filled": 0.0, "synthetic": 0.0}
-    probs = verify_mod.problems(stations, shares, weather_live, receptors_osm, sites_real)
-    sources = {"weather_live": weather_live, "receptors_osm": int(receptors_osm), "sites_real": int(sites_real),
+    probs = verify_mod.problems(stations, shares, weather_live, receptors_osm, sites_real, housing_osm)
+    sources = {"weather_live": weather_live, "receptors_osm": int(receptors_osm), "housing_osm": int(housing_osm), "sites_real": int(sites_real),
                "satellite_scene": scene[0], "satellite_found_at": scene[1].isoformat() if scene[1] else None,
                "run_issued_at": issued.isoformat(), "data_mode": None}
     sources["data_mode"] = conn.execute("select data_mode from runs where id=%s", (run_id,)).fetchone()[0]

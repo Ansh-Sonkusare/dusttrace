@@ -310,7 +310,7 @@ export interface DataCheck {
   shares: { hours: number; real: number; filled: number; synthetic: number };
   stations: { station_id: string; name?: string; newest: string | null; age_h: number | null; status: "fresh" | "stale" | "silent" }[];
   cams: Record<string, { hours: number; mae: number; bias: number; r: number | null; from?: string; to?: string }>;
-  sources: { weather_live: number; receptors_osm: number; sites_real: number; satellite_scene: string | null;
+  sources: { weather_live: number; receptors_osm: number; housing_osm?: number; sites_real: number; satellite_scene: string | null;
              satellite_found_at: string | null; run_issued_at: string; data_mode: string };
   problems: string[];
 }

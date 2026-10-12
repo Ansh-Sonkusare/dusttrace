@@ -38,6 +38,9 @@ jobs:
       - name: Schools and hospitals
         if: steps.gate.outputs.ok == 'true'
         run: python -m dusttrace osm
+      - name: Housing (Census 2011 over OSM residential land)
+        if: ${{ !cancelled() && steps.gate.outputs.ok == 'true' }}
+        run: python -m dusttrace osm-housing
       - name: Construction sites
         # Runs even when the receptor pull fails: the two are independent, and the site pull
         # falls back to the ohsome snapshot when every Overpass mirror is down.

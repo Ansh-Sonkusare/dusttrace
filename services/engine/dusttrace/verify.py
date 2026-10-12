@@ -71,7 +71,8 @@ def _pct(x: float) -> str:
     return f"{round(x * 100)}%"
 
 
-def problems(stations: list[dict], shares: dict, weather_live: float, receptors_osm: int, sites_real: int) -> list[str]:
+def problems(stations: list[dict], shares: dict, weather_live: float, receptors_osm: int, sites_real: int,
+             housing_osm: int | None = None) -> list[str]:
     """Plain sentences for everything in the latest run that isn't real, live data."""
     out = []
     if not any(s["status"] == "fresh" for s in stations):
@@ -86,6 +87,8 @@ def problems(stations: list[dict], shares: dict, weather_live: float, receptors_
         out.append(f"{_pct(1 - weather_live)} of the forecast hours use synthetic weather.")
     if receptors_osm == 0:
         out.append("Schools and hospitals are demo positions: no OpenStreetMap receptors are loaded.")
+    if housing_osm == 0:
+        out.append("Exposure to homes uses demo housing points: no census-based housing is loaded.")
     if sites_real == 0:
         out.append("No real construction site is loaded yet, so only the demo sites get Safe-Work Windows.")
     return out

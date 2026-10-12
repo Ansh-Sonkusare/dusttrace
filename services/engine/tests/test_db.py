@@ -1,6 +1,7 @@
 """Database integration tests. They need TEST_DATABASE_URL (Postgres + PostGIS) and skip without it."""
 
 import numpy as np
+import pytest
 import pandas as pd
 
 from dusttrace import db, pipeline
@@ -331,3 +332,28 @@ def test_verify_measures_the_cams_fill_on_real_stations(conn, settings):
     assert st["openaq-7"]["status"] == "stale" and 95 <= st["openaq-7"]["age_h"] <= 98
     h = chk["cams"]["openaq-7"]
     assert h["hours"] >= 24 * 29 and h["mae"] < 10
+
+
+def test_real_housing_replaces_demo_housing_but_not_demo_schools(conn, settings, monkeypatch):
+    from dusttrace import housing
+    from dusttrace.sources import ohsome
+    calls = []
+
+    def fake_areas(cells, **k):
+        calls.append(len(cells))
+        return {c["id"]: (20_000.0 if i % 10 == 0 else 0.0) for i, c in enumerate(cells)}
+    monkeypatch.setattr(ohsome, "area_by_cell", fake_areas)
+    out = pipeline.load_housing_osm(conn, settings)
+    assert out["receptors"] > 0 and out["census_2011"] == 823_885
+    # spread over the ward's own cells, so the in-ward estimate adds back up to the census figure
+    assert out["population_in_ward"] == pytest.approx(823_885, rel=0.01)
+    kinds = db.read_receptors(conn, "K-East").groupby(["kind", "source"]).size().to_dict()
+    assert ("housing", "seed") not in kinds and kinds[("housing", "osm")] == out["receptors"]
+    assert ("school", "seed") in kinds  # no OSM schools yet, so the demo ones stay
+
+    # a refresh with fewer homes drops cells that no longer qualify
+    ward = [72.835, 19.09, 72.91, 19.14]
+    monkeypatch.setattr(ohsome, "area_by_cell", lambda cells, **k: {housing.in_box(cells, ward)[0]["id"]: 20_000.0})
+    out2 = pipeline.load_housing_osm(conn, settings)
+    assert out2["receptors"] == 1
+    assert one(conn, "select count(*) from receptors where kind='housing' and source='osm'")[0] == 1

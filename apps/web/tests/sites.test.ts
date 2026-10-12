@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candidateSite, parseCandidateVerdict, sourceLabel, monitorLabel } from "../lib/sites";
+import { candidateSite, mapCode, parseCandidateVerdict, siteLabel, sourceLabel, monitorLabel } from "../lib/sites";
 
 const form = (o: Record<string, string>) => {
   const f = new FormData();
@@ -37,5 +37,15 @@ describe("satellite candidate verdicts", () => {
     const s = candidateSite({ id: 7, lat: 19.1123, lon: 72.8701, area_m2: 12345.6 });
     expect(s).toEqual({ id: "sat-7", name: "Construction site (satellite, 19.1123, 72.8701)", activity: "excavation",
       lat: 19.1123, lon: 72.8701, area_m2: 12346 });
+  });
+});
+
+describe("site labels", () => {
+  it("shows the code for demo sites and the name for real ones", () => {
+    expect(siteLabel("A", "Metro Line 7A excavation")).toBe("A · Metro Line 7A excavation");
+    expect(siteLabel("osm-way-554967617", "Metro Casting Yard")).toBe("Metro Casting Yard");
+    expect(mapCode("B")).toBe("B");
+    expect(mapCode("osm-way-554967617")).toBe("");
+    expect(mapCode("sat-12")).toBe("");
   });
 });

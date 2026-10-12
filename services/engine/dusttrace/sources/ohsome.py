@@ -50,3 +50,28 @@ def fetch_sites(bbox: list[float], client: httpx.Client | None = None) -> list[d
     c = client or httpx.Client(timeout=180)
     r = http.post(c, URL, data={"bboxes": ",".join(str(v) for v in bbox), "filter": FILTER, "properties": "tags"})
     return parse_sites(r.json())
+
+
+AREA_URL = "https://api.ohsome.org/v1/elements/area/groupBy/boundary"
+
+
+def parse_areas(payload: dict) -> dict[str, float]:
+    """groupBy/boundary response -> {boundary id: m² of matching land inside it}."""
+    out = {}
+    for g in payload.get("groupByResult") or []:
+        res = g.get("result") or []
+        out[str(g["groupByObject"])] = float(res[-1]["value"]) if res else 0.0
+    return out
+
+
+def area_by_cell(cells: list[dict], filter_: str = "landuse=residential", client: httpx.Client | None = None,
+                 batch: int = 150) -> dict[str, float]:
+    """Land matching `filter_` inside each cell, clipped to the cell (m²)."""
+    c = client or httpx.Client(timeout=300)
+    out: dict[str, float] = {}
+    for i in range(0, len(cells), batch):
+        chunk = cells[i:i + batch]
+        boxes = "|".join(f"{x['id']}:" + ",".join(f"{v:.6f}" for v in x["bbox"]) for x in chunk)
+        r = http.post(c, AREA_URL, data={"bboxes": boxes, "filter": filter_})
+        out.update(parse_areas(r.json()))
+    return out

@@ -36,7 +36,7 @@ export default async function SitesPage() {
                   const rows = windows.filter((w) => w.site_id === s.id);
                   return (
                     <tr key={s.id}>
-                      <td><Link href={`/sites/${s.id}`}><b>{s.id}</b> {s.name}</Link>{sourceLabel(s) && <span className="pill" style={{ marginLeft: 8 }}>{sourceLabel(s)}</span>}</td>
+                      <td><Link href={`/sites/${s.id}`}>{s.id.length <= 3 ? <><b>{s.id}</b> {s.name}</> : s.name}</Link>{sourceLabel(s) && <span className="pill" style={{ marginLeft: 8 }}>{sourceLabel(s)}</span>}</td>
                       <td>{ACTIVITY_LABEL[s.activity] ?? s.activity}</td>
                       <td><TrustPill audit={audits.find((a) => a.site_id === s.id)} status={s.sensor_status} /></td>
                       <td><WindowStrip rows={rows} /></td>

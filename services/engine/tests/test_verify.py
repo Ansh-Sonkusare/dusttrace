@@ -62,7 +62,10 @@ def test_problems_name_what_is_not_real():
     assert any("70% of the last week" in x and "filled" in x for x in p)
     assert any("construction site" in x for x in p)
     assert not any("weather" in x.lower() for x in p)
+    assert not any("housing" in x.lower() for x in p)  # not checked unless given
+    assert any("demo housing" in x for x in verify.problems(stations=[], shares={"hours": 0}, weather_live=1.0,
+                                                          receptors_osm=233, sites_real=3, housing_osm=0))
     ok = verify.problems(stations=[{"station_id": "a", "status": "fresh", "age_h": 1}],
                          shares={"hours": 168, "real": 1.0, "filled": 0.0, "synthetic": 0.0},
-                         weather_live=1.0, receptors_osm=233, sites_real=12)
+                         weather_live=1.0, receptors_osm=233, sites_real=12, housing_osm=622)
     assert ok == []

@@ -101,12 +101,20 @@ def upsert_receptors(conn, recs: list[dict], ward_id: str) -> None:
         )
 
 
-# Real OSM schools and hospitals replace the demo ones once loaded. Demo housing stays until a real
-# population source exists.
+# Real OSM receptors replace the demo ones once loaded: OSM schools and hospitals replace the demo
+# schools and hospitals, and census-based OSM housing (issue #31) replaces the demo housing.
 RECEPTORS_SQL = """select id, name, kind, lat, lon, population, source from receptors r
-  where ward_id=%s and not (source = 'seed' and kind in ('school', 'hospital') and exists (
-    select 1 from receptors o where o.ward_id = r.ward_id and o.source = 'osm'))
+  where ward_id=%s and not (source = 'seed' and exists (
+    select 1 from receptors o where o.ward_id = r.ward_id and o.source = 'osm'
+       and (o.kind = 'housing') = (r.kind = 'housing')))
   order by id"""
+
+
+def replace_osm_housing(conn, recs: list[dict], ward_id: str) -> None:
+    """Upsert the estimated housing cells and drop cells that no longer qualify."""
+    upsert_receptors(conn, recs, ward_id)
+    conn.execute("""delete from receptors where ward_id=%s and source='osm' and kind='housing'
+                    and not (id = any(%s))""", (ward_id, [r["id"] for r in recs]))
 
 
 def read_receptors(conn, ward_id: str) -> pd.DataFrame:
