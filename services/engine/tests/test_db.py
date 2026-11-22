@@ -558,16 +558,6 @@ def _node_with_hours(conn, node_id, lat, lon, now, pm10_by_hour, receptor_id=Non
     conn.commit()
 
 
-def test_a_hot_node_at_a_receptor_is_found(conn, settings):
-    now = pipeline.now_hour()
-    rid = one(conn, "select id from receptors where kind='school' limit 1")[0]
-    _node_with_hours(conn, "node-hot", 19.11, 72.86, now, {now - pd.Timedelta(hours=2): 140.0}, receptor_id=rid)
-    _node_with_hours(conn, "node-calm", 19.12, 72.87, now, {now - pd.Timedelta(hours=2): 60.0})
-    _node_with_hours(conn, "node-old", 19.13, 72.88, now, {now - pd.Timedelta(hours=9): 160.0}, receptor_id=rid)
-    assert db.hot_node_receptors(conn, "K-East", now) == {rid}
-    assert one(conn, "select round(pm10) from node_hourly where node_id='node-hot'")[0] == 140
-
-
 def test_a_fix_check_uses_a_node_beside_the_site(conn, settings):
     now = pipeline.now_hour()
     cid, aid = _case_with_mist(conn, now - pd.Timedelta(hours=8))
@@ -583,18 +573,40 @@ def test_a_fix_check_uses_a_node_beside_the_site(conn, settings):
     assert v == ("node-east-of-a", None, "drop")
 
 
+def _past_exposure(conn, site, receptor, ts, issued):
+    """The forecast in force at `ts` (a run issued at `issued`) had `site`'s plume over `receptor`."""
+    run_id = db.create_run(conn, "K-East", issued.to_pydatetime(), "synthetic", "test", {})
+    conn.execute("insert into exposures (run_id, site_id, receptor_id, ts, conc) values (%s,%s,%s,%s,30)",
+                 (run_id, site, receptor, ts.to_pydatetime()))
+    conn.commit()
+
+
+def test_the_receptor_signal_goes_to_the_site_whose_plume_was_there_when_the_node_read_high(conn, settings):
+    now = pipeline.now_hour()
+    rid = one(conn, "select id from receptors where kind='school' limit 1")[0]
+    hot_hour = now - pd.Timedelta(hours=2)
+    _node_with_hours(conn, "node-at-school", 19.11, 72.86, now, {hot_hour: 150.0}, receptor_id=rid)
+    _past_exposure(conn, "A", rid, hot_hour, issued=now - pd.Timedelta(hours=6))                       # A's plume, that hour
+    _past_exposure(conn, "B", rid, now - pd.Timedelta(hours=20), issued=now - pd.Timedelta(hours=24))  # B's, a day earlier
+    assert db.hot_node_sites(conn, "K-East", now) == {"A"}
+
+
 def test_a_hot_node_reaches_the_agent_through_the_run(conn, settings):
     pipeline.ingest(conn, settings, mode="synthetic", days=60)
-    first = pipeline.run(conn, settings)
-    hit = conn.execute("""select e.receptor_id, e.site_id from exposures e
-                           join cases c on c.site_id = e.site_id and c.closed_at is null
-                          where e.run_id=%s and extract(hour from e.ts at time zone 'Asia/Kolkata') between 6 and 21
-                          order by e.ts limit 1""", (first["run_id"],)).fetchone()
-    if hit is None:
-        pytest.skip("no plume reached a receptor in this synthetic run")
-    receptor, site = hit
     now = pipeline.now_hour()
-    _node_with_hours(conn, "node-at-receptor", 19.11, 72.86, now, {now - pd.Timedelta(hours=1): 150.0}, receptor_id=receptor)
+    rid = one(conn, "select id from receptors where kind='school' limit 1")[0]
+    hot_hour = now - pd.Timedelta(hours=1)
+    _node_with_hours(conn, "node-at-school", 19.11, 72.86, now, {hot_hour: 150.0}, receptor_id=rid)
+    _past_exposure(conn, "D", rid, hot_hour, issued=now - pd.Timedelta(hours=5))  # D always has a case (unsensored)
     pipeline.run(conn, settings)
-    signals = one(conn, "select signals from cases where site_id=%s and closed_at is null", (site,))
-    assert signals is not None and "receptor monitor" in signals[0]
+    assert "receptor monitor" in one(conn, "select signals from cases where site_id='D' and closed_at is null")[0]
+
+
+def test_a_node_without_history_does_not_take_the_verdict_from_a_station(conn, settings):
+    now = pipeline.now_hour()
+    cid, aid = _case_with_mist(conn, now - pd.Timedelta(hours=8))
+    _downwind_station(conn, now, during=55.0)  # real station 2 km downwind, 22 days of history
+    db.add_node(conn, {"id": "node-new", "name": "New node", "host_kind": "school", "lat": 19.117, "lon": 72.861}, "K-East")
+    conn.commit()                              # 0.5 km downwind, no readings yet
+    assert pipeline.verify_actions(conn, "K-East", now)["drop"] == 1
+    assert one(conn, "select station_id, node_id from verifications where action_id=%s", (aid,)) == ("openaq-11", None)
