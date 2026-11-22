@@ -2,7 +2,7 @@
 // Resident pages (/s/…), site-manager plans (/plan/…, which carry their own signed token) and the
 // public report endpoint and the read-only public API (/api/public/v1/…) stay open.
 
-const PUBLIC = [/^\/s\//, /^\/plan\//, /^\/api\/report$/, /^\/api\/public\/v1\//, /^\/_next\//, /^\/maplibre\//, /^\/favicon\.ico$/];
+const PUBLIC = [/^\/s\//, /^\/plan\//, /^\/api\/report$/, /^\/api\/public\/v1\//, /^\/api\/node$/, /^\/_next\//, /^\/maplibre\//, /^\/favicon\.ico$/];
 
 export type AuthResult = "ok" | "challenge" | "misconfigured";
 

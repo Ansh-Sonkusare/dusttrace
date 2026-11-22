@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import secrets
 from pathlib import Path
 
 import pandas as pd
@@ -78,6 +80,20 @@ def upsert_sites(conn, sites: list[dict], ward_id: str) -> int:
              s.get("area_m2", 5000), s.get("source", "osm")),
         )
     return len(sites)
+
+
+def add_node(conn, n: dict, ward_id: str) -> str:
+    """Provision a DustTrace Node, or rotate its key. Returns the key: shown once, stored only as SHA-256."""
+    key = secrets.token_urlsafe(32)
+    conn.execute(
+        """insert into nodes (id, ward_id, name, host_kind, receptor_id, lat, lon, key_hash)
+           values (%s,%s,%s,%s,%s,%s,%s,%s)
+           on conflict (id) do update set ward_id=excluded.ward_id, name=excluded.name, host_kind=excluded.host_kind,
+           receptor_id=excluded.receptor_id, lat=excluded.lat, lon=excluded.lon, key_hash=excluded.key_hash, active=true""",
+        (n["id"], ward_id, n["name"], n["host_kind"], n.get("receptor_id"), n["lat"], n["lon"],
+         hashlib.sha256(key.encode()).hexdigest()),
+    )
+    return key
 
 
 def upsert_station(conn, s: dict, ward_id: str) -> None:
