@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { Receptor, Site, Station, Status } from "@/lib/queries";
+import type { MapNode, Receptor, Site, Station, Status } from "@/lib/queries";
 import { dayHour } from "@/lib/format";
 
 export interface MapHour {
@@ -20,7 +20,8 @@ if (typeof window !== "undefined") maplibregl.setWorkerUrl("/maplibre/maplibre-g
 const STATUS_COLOR: Record<Status, string> = { go: "#6CC59A", caution: "#E0A245", avoid: "#EB6E5B" };
 const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
 
-export default function DustMap({ center, sites, receptors, stations, hours, boundary }: {
+export default function DustMap({ center, sites, receptors, stations, nodes, hours, boundary }: {
+  nodes: MapNode[];
   center: [number, number];
   boundary?: { type: "Polygon"; coordinates: number[][][] } | null;
   sites: Site[];
@@ -69,6 +70,11 @@ export default function DustMap({ center, sites, receptors, stations, hours, bou
         data: { type: "FeatureCollection", features: stations.map((s) => ({ type: "Feature", properties: { name: s.name }, geometry: { type: "Point", coordinates: [s.lon, s.lat] } })) },
       });
       m.addLayer({ id: "stations", type: "circle", source: "stations", paint: { "circle-radius": 6, "circle-color": "#86BDB9", "circle-stroke-color": "#0B0B0C", "circle-stroke-width": 2 } });
+      m.addSource("nodes", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: nodes.map((n) => ({ type: "Feature", properties: { name: n.name, status: n.status }, geometry: { type: "Point", coordinates: [n.lon, n.lat] } })) },
+      });
+      m.addLayer({ id: "nodes", type: "circle", source: "nodes", paint: { "circle-radius": 5, "circle-color": "#0B0B0C", "circle-stroke-width": 2, "circle-stroke-color": ["match", ["get", "status"], "live", "#86BDB9", "#6F6F75"] } });
 
       m.addSource("sites", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       m.addLayer({ id: "sites", type: "circle", source: "sites", paint: { "circle-radius": 11, "circle-color": ["get", "color"], "circle-stroke-color": "#0B0B0C", "circle-stroke-width": 3 } });
@@ -130,6 +136,7 @@ export default function DustMap({ center, sites, receptors, stations, hours, bou
         <span><i className="dot" style={{ background: "#F2F2F2" }} /> School, hospital</span>
         <span><i className="dot" style={{ background: "#6F6F75" }} /> Homes</span>
         <span><i className="dot" style={{ background: "#86BDB9" }} /> Station</span>
+        {nodes.length > 0 && <span><i className="dot" style={{ background: "#0B0B0C", boxShadow: "inset 0 0 0 2px #86BDB9" }} /> DustTrace Node</span>}
         <span><i className="dot" style={{ background: "#E0A245", opacity: 0.4 }} /> Plume above 25 µg/m³ added</span>
       </div>
     </div>

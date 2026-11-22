@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashKey, keyMatches, parseNodePost, rhCorrect } from "../lib/node";
+import { hashKey, keyMatches, nodeStatus, parseNodePost, rhCorrect } from "../lib/node";
 
 const NOW = new Date("2026-11-22T10:00:00Z");
 const body = (o: Record<string, unknown>) => ({ node_id: "node-marol-school", readings: [{ pm25: 40, pm10: 80, rh: 60, temp: 29 }], ...o });
@@ -58,5 +58,14 @@ describe("node post", () => {
       null,
     ];
     for (const b of bad) expect(parseNodePost(b, NOW).ok).toBe(false);
+  });
+});
+
+describe("node status on the map", () => {
+  it("is live only with a reading in the last two hours", () => {
+    const now = new Date("2026-11-22T10:00:00Z");
+    expect(nodeStatus("2026-11-22T09:30:00Z", now)).toBe("live");
+    expect(nodeStatus("2026-11-22T07:30:00Z", now)).toBe("silent");
+    expect(nodeStatus(null, now)).toBe("silent");
   });
 });

@@ -188,3 +188,12 @@ def test_dry_windy_day_ahead_means_pre_wet_even_without_a_spike():
 def test_playbook_actions_are_dropped_for_a_non_construction_source():
     d = agent.decide(ctx(activity="debris", sensor_hot_hours=1, non_construction=True))
     assert not {"ORDER_COVER_DEBRIS", "ORDER_WHEEL_WASH", "PRE_WET_SITE"} & set(actions(d))
+
+
+def test_a_node_at_the_receptor_is_a_second_signal_that_unlocks_enforcement():
+    base = dict(site_id="D", has_sensor=False, has_relay=False, trust=None)  # one signal: the site registry
+    alone = actions(agent.decide(ctx(**base)))
+    assert "REQUEST_SPOT_CHECK" in alone and "ADD_TO_INSPECTION" not in alone  # D1 holds enforcement back
+    d = agent.decide(ctx(**base, receptor_node_hot=True))
+    assert "receptor monitor" in d.signals
+    assert "ADD_TO_INSPECTION" in actions(d) and "REQUEST_SPOT_CHECK" not in actions(d)

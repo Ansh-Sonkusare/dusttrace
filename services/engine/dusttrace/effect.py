@@ -56,7 +56,7 @@ def assess(pm10: pd.Series, wind_dir: pd.Series, window: tuple[pd.Timestamp, pd.
     during = pm10[in_w].dropna()
     base = {"during": None, "baseline": None, "change_pct": None, "days": 0}
     if len(during) < MIN_COVERAGE * hours:
-        return {**base, "verdict": "insufficient", "note": "no readings at the station in the window"}
+        return {**base, "verdict": "insufficient", "note": "no readings in the window"}
     wd_w = wind_dir[(wind_dir.index >= start) & (wind_dir.index < end)]
     sector = _mean_dir(wd_w) if len(wd_w.dropna()) else None
     vals = []

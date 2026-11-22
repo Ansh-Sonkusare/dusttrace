@@ -543,3 +543,73 @@ def test_a_node_is_provisioned_with_a_one_time_key_stored_only_as_a_hash(conn, s
     key2 = db.add_node(conn, {"id": "node-marol-school", "name": "Marol school roof", "host_kind": "school",
                               "lat": 19.1172, "lon": 72.8790}, "K-East")
     assert key2 != key and one(conn, "select key_hash from nodes where id='node-marol-school'")[0] == hashlib.sha256(key2.encode()).hexdigest()
+
+
+def _node_with_hours(conn, node_id, lat, lon, now, pm10_by_hour, receptor_id=None):
+    """A node whose minute readings average to the given PM10 per hour (corrected = raw at RH 0)."""
+    db.add_node(conn, {"id": node_id, "name": node_id, "host_kind": "school", "lat": lat, "lon": lon,
+                       "receptor_id": receptor_id}, "K-East")
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into node_readings (node_id, ts, pm25_raw, pm10_raw, rh, pm25_corrected, pm10_corrected)
+               values (%s, %s, %s, %s, 0, %s, %s)""",
+            [(node_id, (h + pd.Timedelta(minutes=m)).to_pydatetime(), v * 0.4, v, v * 0.4, v)
+             for h, v in pm10_by_hour.items() for m in (0, 20, 40)])
+    conn.commit()
+
+
+def test_a_fix_check_uses_a_node_beside_the_site(conn, settings):
+    now = pipeline.now_hour()
+    cid, aid = _case_with_mist(conn, now - pd.Timedelta(hours=8))
+    ts = pd.date_range(end=now, periods=24 * 22, freq="h", tz="UTC")
+    wx = pd.DataFrame({"ts": ts, "wind_speed": 3.0, "wind_dir": 270.0, "blh": 600.0, "temp": 30.0, "rh": 60.0, "precip": 0.0})
+    db.write_weather(conn, "K-East", wx, now, synthetic=False)
+    window = (ts >= now - pd.Timedelta(hours=8)) & (ts < now - pd.Timedelta(hours=2))
+    _node_with_hours(conn, "node-east-of-a", 19.117, 72.861, now,   # ~0.5 km east of Site A, downwind
+                     {t: (50.0 if w else 80.0) for t, w in zip(ts, window)})
+    out = pipeline.verify_actions(conn, "K-East", now)
+    assert out["drop"] == 1
+    v = one(conn, "select node_id, station_id, verdict from verifications where action_id=%s", (aid,))
+    assert v == ("node-east-of-a", None, "drop")
+
+
+def _past_exposure(conn, site, receptor, ts, issued):
+    """The forecast in force at `ts` (a run issued at `issued`) had `site`'s plume over `receptor`."""
+    run_id = db.create_run(conn, "K-East", issued.to_pydatetime(), "synthetic", "test", {})
+    conn.execute("insert into exposures (run_id, site_id, receptor_id, ts, conc) values (%s,%s,%s,%s,30)",
+                 (run_id, site, receptor, ts.to_pydatetime()))
+    conn.commit()
+
+
+def test_the_receptor_signal_goes_to_the_site_whose_plume_was_there_when_the_node_read_high(conn, settings):
+    now = pipeline.now_hour()
+    rid = one(conn, "select id from receptors where kind='school' limit 1")[0]
+    hot_hour = now - pd.Timedelta(hours=2)
+    _node_with_hours(conn, "node-at-school", 19.11, 72.86, now, {hot_hour: 150.0}, receptor_id=rid)
+    _past_exposure(conn, "A", rid, hot_hour, issued=now - pd.Timedelta(hours=6))                       # A's plume, that hour
+    _past_exposure(conn, "B", rid, now - pd.Timedelta(hours=20), issued=now - pd.Timedelta(hours=24))  # B's, a day earlier
+    # Hourly runs: one issued exactly at the hot hour forecasts only the hours after it, so it isn't the
+    # forecast in force at that hour.
+    _past_exposure(conn, "C", rid, hot_hour + pd.Timedelta(hours=1), issued=hot_hour)
+    assert db.hot_node_sites(conn, "K-East", now) == {"A"}
+
+
+def test_a_hot_node_reaches_the_agent_through_the_run(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    now = pipeline.now_hour()
+    rid = one(conn, "select id from receptors where kind='school' limit 1")[0]
+    hot_hour = now - pd.Timedelta(hours=1)
+    _node_with_hours(conn, "node-at-school", 19.11, 72.86, now, {hot_hour: 150.0}, receptor_id=rid)
+    _past_exposure(conn, "D", rid, hot_hour, issued=now - pd.Timedelta(hours=5))  # D always has a case (unsensored)
+    pipeline.run(conn, settings)
+    assert "receptor monitor" in one(conn, "select signals from cases where site_id='D' and closed_at is null")[0]
+
+
+def test_a_node_without_history_does_not_take_the_verdict_from_a_station(conn, settings):
+    now = pipeline.now_hour()
+    cid, aid = _case_with_mist(conn, now - pd.Timedelta(hours=8))
+    _downwind_station(conn, now, during=55.0)  # real station 2 km downwind, 22 days of history
+    db.add_node(conn, {"id": "node-new", "name": "New node", "host_kind": "school", "lat": 19.117, "lon": 72.861}, "K-East")
+    conn.commit()                              # 0.5 km downwind, no readings yet
+    assert pipeline.verify_actions(conn, "K-East", now)["drop"] == 1
+    assert one(conn, "select station_id, node_id from verifications where action_id=%s", (aid,)) == ("openaq-11", None)

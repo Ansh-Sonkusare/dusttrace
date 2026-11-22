@@ -61,3 +61,8 @@ export function parseNodePost(body: unknown, now: Date): Parsed<{ nodeId: string
   }
   return { ok: true, value: { nodeId, readings: out } };
 }
+
+const SILENT_AFTER_MS = 2 * 3600_000;
+
+export const nodeStatus = (lastSeen: string | null, now: Date): "live" | "silent" =>
+  lastSeen !== null && now.getTime() - new Date(lastSeen).getTime() <= SILENT_AFTER_MS ? "live" : "silent";

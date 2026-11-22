@@ -346,6 +346,7 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
     trust = {a.site_id: a.score for a in audits}
     signals = db.site_signals(conn, ward_id)
     accepted = db.plans_accepted_today(conn, ward_id)
+    hot_sites = db.hot_node_sites(conn, ward_id, now)
     states = []
     for s in sites.itertuples():
         # Only hours when dusty work is allowed (06:00-22:00 IST) can need a site to act.
@@ -368,6 +369,7 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
             citizen_reports=signals.get(s.id, {}).get("reports", 0),
             confirmed_violation=signals.get(s.id, {}).get("confirmed_violation", False),
             satellite_active=signals.get(s.id, {}).get("satellite", False),
+            receptor_node_hot=s.id in hot_sites,
         )
         decision = agent.decide(ctx)
         case_id = db.write_case(conn, run_id, s.id, decision)
@@ -442,7 +444,8 @@ VERIFY_ACTIONS = ("SCHEDULE_MIST", "PRE_WET_SITE", "TRIGGER_MIST_NOW", "PAUSE_DU
 
 def verify_actions(conn, ward_id: str, now: pd.Timestamp) -> dict:
     """Verify (F12, issue #33): for each dust-cutting action whose window has passed, compare PM10 at the
-    nearest real station downwind of the site with comparable earlier days. A verified drop closes the case."""
+    nearest monitor downwind of the site (a real station or a DustTrace Node) that has the data for it, with
+    comparable earlier days. A verified drop closes the case."""
     todo = conn.execute("""select a.id, a.case_id, c.site_id, a.action, coalesce(a.at, a.created_at), s.lat, s.lon
                              from case_actions a join cases c on c.id = a.case_id join sites s on s.id = c.site_id
                             where s.ward_id=%s and c.closed_at is null and a.phase='final'
@@ -457,8 +460,10 @@ def verify_actions(conn, ward_id: str, now: pd.Timestamp) -> dict:
     counts = {"checked": 0, "drop": 0, "no_drop": 0, "insufficient": 0}
     if not todo:
         return counts
-    stations = conn.execute("""select id, name, lat, lon from stations where ward_id=%s and source <> 'seed'""",
-                            (ward_id,)).fetchall()
+    monitors = conn.execute("""select id, name, lat, lon, 'station' from stations where ward_id=%s and source <> 'seed'
+                                union all
+                                select id, name, lat, lon, 'node' from nodes where ward_id=%s and active""",
+                            (ward_id, ward_id)).fetchall()
     for aid, cid, site_id, action, at, lat, lon in todo:
         start = pd.Timestamp(at).floor("h")
         end = start + pd.Timedelta(hours=effect.WINDOW_H)
@@ -469,26 +474,32 @@ def verify_actions(conn, ward_id: str, now: pd.Timestamp) -> dict:
         wind = wd.set_index("ts")["wind_dir"].astype(float)
         w_now = wind[(wind.index >= start) & (wind.index < end)]
         site = (float(lat), float(lon))
-        near = sorted((effect.km(site, (float(s[2]), float(s[3]))), s) for s in stations)
-        pick = next((s for d, s in near if d <= effect.REACH_KM and len(w_now)
-                     and effect.downwind(site, (float(s[2]), float(s[3])), effect._mean_dir(w_now))), None)
-        if pick is None:
-            res = {"verdict": "insufficient", "during": None, "baseline": None, "change_pct": None, "days": 0,
-                   "note": "no real station downwind within 4 km in the window"}
-        else:
-            pm = db.read_frame(conn, """select ts, pm10 from readings where station_id=%s and not synthetic
-                                         and ts > %s and ts < %s""", (pick[0], (start - pd.Timedelta(days=effect.LOOKBACK_DAYS + 1)).to_pydatetime(),
-                                                                     end.to_pydatetime()))
+        near = sorted((effect.km(site, (float(s[2]), float(s[3]))), s) for s in monitors)
+        downwind = [s for d, s in near if d <= effect.REACH_KM and len(w_now)
+                    and effect.downwind(site, (float(s[2]), float(s[3])), effect._mean_dir(w_now))]
+        pick, res = None, {"verdict": "insufficient", "during": None, "baseline": None, "change_pct": None, "days": 0,
+                           "note": "no real station or node downwind within 4 km in the window"}
+        for mon in downwind:  # nearest first; a monitor without the data for a verdict yields to the next
+            series = ("select ts, pm10 from node_hourly where node_id=%s and ts > %s and ts < %s" if mon[4] == "node" else
+                      "select ts, pm10 from readings where station_id=%s and not synthetic and ts > %s and ts < %s")
+            pm = db.read_frame(conn, series, (mon[0], (start - pd.Timedelta(days=effect.LOOKBACK_DAYS + 1)).to_pydatetime(),
+                                              end.to_pydatetime()))
             pm["ts"] = pd.to_datetime(pm["ts"], utc=True)
-            res = effect.assess(pm.set_index("ts")["pm10"].astype(float), wind, (start, end))
-            res["note"] = f"{pick[1]}: {res['note']}"
-        conn.execute("""insert into verifications (action_id, case_id, site_id, action, station_id, window_start, window_end,
-                        during, baseline, change_pct, days, verdict, note, checked_at)
-                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        on conflict (action_id) do update set station_id=excluded.station_id, during=excluded.during,
+            r = effect.assess(pm.set_index("ts")["pm10"].astype(float), wind, (start, end))
+            r["note"] = f"{mon[1]}: {r['note']}"
+            if pick is None or r["verdict"] != "insufficient":
+                pick, res = mon, r
+            if r["verdict"] != "insufficient":
+                break
+        conn.execute("""insert into verifications (action_id, case_id, site_id, action, station_id, node_id, window_start,
+                        window_end, during, baseline, change_pct, days, verdict, note, checked_at)
+                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        on conflict (action_id) do update set station_id=excluded.station_id, node_id=excluded.node_id,
+                        during=excluded.during,
                         baseline=excluded.baseline, change_pct=excluded.change_pct, days=excluded.days,
                         verdict=excluded.verdict, note=excluded.note, checked_at=excluded.checked_at""",
-                     (aid, cid, site_id, action, pick[0] if pick else None, start.to_pydatetime(), end.to_pydatetime(),
+                     (aid, cid, site_id, action, pick[0] if pick and pick[4] == "station" else None,
+                      pick[0] if pick and pick[4] == "node" else None, start.to_pydatetime(), end.to_pydatetime(),
                       res["during"], res["baseline"], res["change_pct"], res["days"], res["verdict"], res["note"],
                       now.to_pydatetime()))
         if res["verdict"] == "drop":
