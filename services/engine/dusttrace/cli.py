@@ -4,6 +4,7 @@
   seed      load the ward, seed stations, demo sites and receptors
   osm       replace demo receptors with real OSM schools and hospitals (needs network)
   osm-sites add construction sites mapped in OSM inside the ward (needs network)
+  node-add  provision a DustTrace Node (--id --name --host-kind --lat --lon) and print its key once
   osm-housing  estimated housing exposure: Census 2011 people over OSM residential land (needs network)
   ingest    load weather + readings (--mode auto|live|synthetic, --days N)
   run       train, forecast 48 h, plumes, Safe-Work Windows
@@ -20,6 +21,7 @@ import argparse
 import dataclasses
 import json
 import logging
+import re
 import sys
 
 from . import db, pipeline
@@ -36,6 +38,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("osm")
     sub.add_parser("osm-sites")
     sub.add_parser("osm-housing")
+    na = sub.add_parser("node-add", help="provision a DustTrace Node and print its key (shown once)")
+    na.add_argument("--id", required=True, help="node-<slug>, e.g. node-marol-school")
+    na.add_argument("--name", required=True)
+    na.add_argument("--host-kind", required=True, choices=["school", "hospital", "housing", "site_gate", "other"])
+    na.add_argument("--lat", type=float, required=True)
+    na.add_argument("--lon", type=float, required=True)
+    na.add_argument("--receptor", help="receptor id of the school or society hosting it")
     ing = sub.add_parser("ingest")
     ing.add_argument("--mode", choices=["auto", "live", "synthetic"], default="auto")
     ing.add_argument("--days", type=int, default=420)
@@ -63,6 +72,13 @@ def main(argv: list[str] | None = None) -> int:
             print("seeded ward, stations, sites, receptors")
         if args.cmd == "osm":
             print("receptors from OSM:", pipeline.load_receptors_osm(conn, settings))
+        if args.cmd == "node-add":
+            if not re.fullmatch(r"node-[a-z0-9-]{1,48}", args.id):
+                p.error("--id must look like node-<lowercase-slug>")
+            key = db.add_node(conn, {"id": args.id, "name": args.name, "host_kind": args.host_kind, "lat": args.lat,
+                                     "lon": args.lon, "receptor_id": args.receptor}, settings.ward_id)
+            conn.commit()
+            print(f"node {args.id} in {settings.ward_id}. Its key (shown once; flash it into the node):\n{key}")
         if args.cmd == "osm-housing":
             h = pipeline.load_housing_osm(conn, settings)
             print(f"housing: {h['receptors']} cells, {h['residential_km2']} km² of homes in the ward, "

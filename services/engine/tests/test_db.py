@@ -529,3 +529,17 @@ def test_two_wards_housing_does_not_collide(conn, settings, monkeypatch):
     # each ward's homes sit in its own box
     lat = dict(conn.execute("select ward_id, avg(lat) from receptors where kind='housing' and source='osm' group by 1").fetchall())
     assert float(lat["K-East"]) < 19.15 < float(lat["P-North"])
+
+
+def test_a_node_is_provisioned_with_a_one_time_key_stored_only_as_a_hash(conn, settings):
+    import hashlib
+    key = db.add_node(conn, {"id": "node-marol-school", "name": "Marol school roof", "host_kind": "school",
+                             "lat": 19.1172, "lon": 72.8790}, "K-East")
+    conn.commit()
+    row = one(conn, "select key_hash, active, ward_id from nodes where id='node-marol-school'")
+    assert row[0] == hashlib.sha256(key.encode()).hexdigest() and key not in row[0]
+    assert row[1] is True and row[2] == "K-East" and len(key) >= 32
+    # Re-provisioning rotates the key: the old one stops matching.
+    key2 = db.add_node(conn, {"id": "node-marol-school", "name": "Marol school roof", "host_kind": "school",
+                              "lat": 19.1172, "lon": 72.8790}, "K-East")
+    assert key2 != key and one(conn, "select key_hash from nodes where id='node-marol-school'")[0] == hashlib.sha256(key2.encode()).hexdigest()
