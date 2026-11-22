@@ -3,7 +3,7 @@ import { siteLabel } from "@/lib/sites";
 import DustMap from "@/components/DustMap";
 import NoRun from "@/components/Empty";
 import Link from "next/link";
-import { getAlerts, getKpis, getLatestRun, getPlumes, getReceptors, getSites, getStations, getWard, getWardForecast, getWeather, getWindows } from "@/lib/queries";
+import { getAlerts, getKpis, getLatestRun, getPlumes, getReceptors, getSites, getNodes, getStations, getWard, getWardForecast, getWeather, getWindows } from "@/lib/queries";
 import { kpiTiles } from "@/lib/kpi";
 import { dataNotice } from "@/lib/notice";
 import { buildMapHours, spans } from "@/lib/mapHours";
@@ -17,9 +17,9 @@ export default async function Overview() {
   const [ward, run] = await Promise.all([getWard(), getLatestRun()]);
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
 
-  const [fc, windows, plumes, wx, sites, receptors, stations, kpis, alerts] = await Promise.all([
+  const [fc, windows, plumes, wx, sites, receptors, stations, kpis, alerts, nodes] = await Promise.all([
     getWardForecast(run.id), getWindows(run.id), getPlumes(run.id), getWeather(run.issued_at),
-    getSites(), getReceptors(), getStations(run.metrics.stations), getKpis(run), getAlerts(run.id),
+    getSites(), getReceptors(), getStations(run.metrics.stations), getKpis(run), getAlerts(run.id), getNodes(),
   ]);
   const hours = buildMapHours(windows, plumes, wx);
   const notice = dataNotice(run.data_mode, run.metrics.newest_real_reading, run.issued_at, run.metrics.filled?.stations ?? 0);
@@ -45,7 +45,7 @@ export default async function Overview() {
         <div className="grid2">
           <section className="panel" aria-label="Plume map">
             <div className="ph"><h2>Plume map</h2><span className="meta">Gaussian plume, hourly</span></div>
-            <DustMap center={[ward.center_lon, ward.center_lat]} boundary={ward.boundary} sites={sites} receptors={receptors} stations={stations} hours={hours} />
+            <DustMap center={[ward.center_lon, ward.center_lat]} boundary={ward.boundary} sites={sites} receptors={receptors} stations={stations} nodes={nodes} hours={hours} />
           </section>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <section className="panel" aria-label="Alerts">

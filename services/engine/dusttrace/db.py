@@ -96,6 +96,15 @@ def add_node(conn, n: dict, ward_id: str) -> str:
     return key
 
 
+def hot_node_receptors(conn, ward_id: str, now, hours: int = 6, threshold: float = 100.0) -> set[str]:
+    """Receptors whose DustTrace Node read an hourly PM10 above the threshold in the last few hours."""
+    rows = conn.execute("""select distinct n.receptor_id from nodes n join node_hourly h on h.node_id = n.id
+                           where n.ward_id=%s and n.active and n.receptor_id is not null
+                             and h.ts > %s and h.ts <= %s and h.pm10 > %s""",
+                        (ward_id, (now - pd.Timedelta(hours=hours)).to_pydatetime(), now.to_pydatetime(), threshold)).fetchall()
+    return {r[0] for r in rows}
+
+
 def upsert_station(conn, s: dict, ward_id: str) -> None:
     meta = {k: v for k, v in s.items() if k in ("sensors", "provider")}
     conn.execute(

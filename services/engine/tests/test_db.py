@@ -543,3 +543,58 @@ def test_a_node_is_provisioned_with_a_one_time_key_stored_only_as_a_hash(conn, s
     key2 = db.add_node(conn, {"id": "node-marol-school", "name": "Marol school roof", "host_kind": "school",
                               "lat": 19.1172, "lon": 72.8790}, "K-East")
     assert key2 != key and one(conn, "select key_hash from nodes where id='node-marol-school'")[0] == hashlib.sha256(key2.encode()).hexdigest()
+
+
+def _node_with_hours(conn, node_id, lat, lon, now, pm10_by_hour, receptor_id=None):
+    """A node whose minute readings average to the given PM10 per hour (corrected = raw at RH 0)."""
+    db.add_node(conn, {"id": node_id, "name": node_id, "host_kind": "school", "lat": lat, "lon": lon,
+                       "receptor_id": receptor_id}, "K-East")
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into node_readings (node_id, ts, pm25_raw, pm10_raw, rh, pm25_corrected, pm10_corrected)
+               values (%s, %s, %s, %s, 0, %s, %s)""",
+            [(node_id, (h + pd.Timedelta(minutes=m)).to_pydatetime(), v * 0.4, v, v * 0.4, v)
+             for h, v in pm10_by_hour.items() for m in (0, 20, 40)])
+    conn.commit()
+
+
+def test_a_hot_node_at_a_receptor_is_found(conn, settings):
+    now = pipeline.now_hour()
+    rid = one(conn, "select id from receptors where kind='school' limit 1")[0]
+    _node_with_hours(conn, "node-hot", 19.11, 72.86, now, {now - pd.Timedelta(hours=2): 140.0}, receptor_id=rid)
+    _node_with_hours(conn, "node-calm", 19.12, 72.87, now, {now - pd.Timedelta(hours=2): 60.0})
+    _node_with_hours(conn, "node-old", 19.13, 72.88, now, {now - pd.Timedelta(hours=9): 160.0}, receptor_id=rid)
+    assert db.hot_node_receptors(conn, "K-East", now) == {rid}
+    assert one(conn, "select round(pm10) from node_hourly where node_id='node-hot'")[0] == 140
+
+
+def test_a_fix_check_uses_a_node_beside_the_site(conn, settings):
+    now = pipeline.now_hour()
+    cid, aid = _case_with_mist(conn, now - pd.Timedelta(hours=8))
+    ts = pd.date_range(end=now, periods=24 * 22, freq="h", tz="UTC")
+    wx = pd.DataFrame({"ts": ts, "wind_speed": 3.0, "wind_dir": 270.0, "blh": 600.0, "temp": 30.0, "rh": 60.0, "precip": 0.0})
+    db.write_weather(conn, "K-East", wx, now, synthetic=False)
+    window = (ts >= now - pd.Timedelta(hours=8)) & (ts < now - pd.Timedelta(hours=2))
+    _node_with_hours(conn, "node-east-of-a", 19.117, 72.861, now,   # ~0.5 km east of Site A, downwind
+                     {t: (50.0 if w else 80.0) for t, w in zip(ts, window)})
+    out = pipeline.verify_actions(conn, "K-East", now)
+    assert out["drop"] == 1
+    v = one(conn, "select node_id, station_id, verdict from verifications where action_id=%s", (aid,))
+    assert v == ("node-east-of-a", None, "drop")
+
+
+def test_a_hot_node_reaches_the_agent_through_the_run(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    first = pipeline.run(conn, settings)
+    hit = conn.execute("""select e.receptor_id, e.site_id from exposures e
+                           join cases c on c.site_id = e.site_id and c.closed_at is null
+                          where e.run_id=%s and extract(hour from e.ts at time zone 'Asia/Kolkata') between 6 and 21
+                          order by e.ts limit 1""", (first["run_id"],)).fetchone()
+    if hit is None:
+        pytest.skip("no plume reached a receptor in this synthetic run")
+    receptor, site = hit
+    now = pipeline.now_hour()
+    _node_with_hours(conn, "node-at-receptor", 19.11, 72.86, now, {now - pd.Timedelta(hours=1): 150.0}, receptor_id=receptor)
+    pipeline.run(conn, settings)
+    signals = one(conn, "select signals from cases where site_id=%s and closed_at is null", (site,))
+    assert signals is not None and "receptor monitor" in signals[0]

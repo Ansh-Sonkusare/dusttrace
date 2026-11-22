@@ -1,4 +1,5 @@
 import { q, ward } from "./db";
+import { nodeStatus } from "./node";
 
 export type Status = "go" | "caution" | "avoid";
 
@@ -395,4 +396,20 @@ export async function getWeeklyData(): Promise<WeeklyData> {
     actions, inspections, scores, checks,
     real_hours: mix[0]?.real ?? 0, filled_or_synthetic_hours: mix[0]?.other ?? 0,
   };
+}
+
+export interface MapNode { id: string; name: string; lat: number; lon: number; last_seen_at: string | null; pm10: number | null; status: "live" | "silent" }
+
+// DustTrace Nodes (F9) in the ward, with each one's latest hourly PM10 from the last 3 hours.
+export async function getNodes(): Promise<MapNode[]> {
+  const rows = await q<Omit<MapNode, "status">>(
+    `select n.id, n.name, n.lat, n.lon, n.last_seen_at,
+            (select h.pm10 from node_hourly h where h.node_id = n.id and h.ts > now() - interval '3 hours'
+              order by h.ts desc limit 1)::float as pm10
+       from nodes n where n.ward_id=$1 and n.active order by n.id`, [await ward()]);
+  const now = new Date();
+  return rows.map((r) => {
+    const last_seen_at = r.last_seen_at ? iso(r.last_seen_at) : null;
+    return { ...r, last_seen_at, status: nodeStatus(last_seen_at, now) };
+  });
 }

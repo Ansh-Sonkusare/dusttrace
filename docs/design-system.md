@@ -61,7 +61,7 @@ Writing rules: sentence case everywhere. No all-caps eyebrows, no labels stacked
 | Component | What it shows |
 |---|---|
 | `TopBar` | Ward name, forecast issue time (IST), data-mode pill: Live (green), Partly synthetic (amber), Synthetic (dust) |
-| `DustMap` | MapLibre, OpenFreeMap dark vector basemap (no key; CARTO now needs one); amber plume polygons, white school and hospital dots with labels, small unlabelled grey `#6F6F75` dots for estimated homes, the ward's real boundary as a dashed grey `#A3A3A8` line, teal stations, site discs coloured by status with the site letter; Play + hour slider; wind and legend line |
+| `DustMap` | MapLibre, OpenFreeMap dark vector basemap (no key; CARTO now needs one); amber plume polygons, white school and hospital dots with labels, small unlabelled grey `#6F6F75` dots for estimated homes, the ward's real boundary as a dashed grey `#A3A3A8` line, teal stations, DustTrace Nodes as a teal ring on a dark fill (grey ring once a node has been silent for two hours), site discs coloured by status with the site letter; Play + hour slider; wind and legend line |
 | `ForecastChart` | SVG: amber forecast line, 10–90% band at 14% opacity, grey observed line, white line at the 100 standard, "Now" marker, peak label, hover crosshair and tooltip |
 | `WindowStrip` | One cell per hour, Go / Caution / Avoid; night hours (22:00–06:00 IST) at 35% |
 | `.item` list | 4 px status bar on the left, bold head, muted reason |

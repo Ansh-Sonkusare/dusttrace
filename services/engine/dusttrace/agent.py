@@ -73,6 +73,7 @@ class SiteContext:
     confirmed_violation: bool = False  # an officer confirmed a violation (inspection outcome)
     non_construction: bool = False     # evidence points to a non-construction source
     satellite_active: bool = False     # Sentinel-2 shows new bare ground at the site (F2)
+    receptor_node_hot: bool = False    # a DustTrace Node at a receptor this site's plume reaches read PM10 > 100 (F9)
     sensor_known: bool = True          # False when the site's BMC feed isn't connected: unknown is not "none"
     pm_signature: str | None = None    # nearest real station's PM10/PM2.5 signature: coarse_work | coarse_night | fine | mixed
     pm_station: str | None = None      # that station's name, for the reasons
@@ -170,6 +171,8 @@ def signals(c: SiteContext) -> list[str]:
         s.append("officer inspection")
     if c.satellite_active:
         s.append("satellite change")
+    if c.receptor_node_hot:
+        s.append("receptor monitor")
     if not c.has_sensor and c.sensor_known:
         s.append("site registry")
     return s

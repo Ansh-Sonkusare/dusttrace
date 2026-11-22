@@ -346,6 +346,7 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
     trust = {a.site_id: a.score for a in audits}
     signals = db.site_signals(conn, ward_id)
     accepted = db.plans_accepted_today(conn, ward_id)
+    hot_receptors = db.hot_node_receptors(conn, ward_id, now)
     states = []
     for s in sites.itertuples():
         # Only hours when dusty work is allowed (06:00-22:00 IST) can need a site to act.
@@ -368,6 +369,7 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
             citizen_reports=signals.get(s.id, {}).get("reports", 0),
             confirmed_violation=signals.get(s.id, {}).get("confirmed_violation", False),
             satellite_active=signals.get(s.id, {}).get("satellite", False),
+            receptor_node_hot=any(r in hot_receptors for h in mine for r, _ in h.exposures),
         )
         decision = agent.decide(ctx)
         case_id = db.write_case(conn, run_id, s.id, decision)
@@ -457,8 +459,10 @@ def verify_actions(conn, ward_id: str, now: pd.Timestamp) -> dict:
     counts = {"checked": 0, "drop": 0, "no_drop": 0, "insufficient": 0}
     if not todo:
         return counts
-    stations = conn.execute("""select id, name, lat, lon from stations where ward_id=%s and source <> 'seed'""",
-                            (ward_id,)).fetchall()
+    monitors = conn.execute("""select id, name, lat, lon, 'station' from stations where ward_id=%s and source <> 'seed'
+                                union all
+                                select id, name, lat, lon, 'node' from nodes where ward_id=%s and active""",
+                            (ward_id, ward_id)).fetchall()
     for aid, cid, site_id, action, at, lat, lon in todo:
         start = pd.Timestamp(at).floor("h")
         end = start + pd.Timedelta(hours=effect.WINDOW_H)
@@ -469,26 +473,29 @@ def verify_actions(conn, ward_id: str, now: pd.Timestamp) -> dict:
         wind = wd.set_index("ts")["wind_dir"].astype(float)
         w_now = wind[(wind.index >= start) & (wind.index < end)]
         site = (float(lat), float(lon))
-        near = sorted((effect.km(site, (float(s[2]), float(s[3]))), s) for s in stations)
+        near = sorted((effect.km(site, (float(s[2]), float(s[3]))), s) for s in monitors)
         pick = next((s for d, s in near if d <= effect.REACH_KM and len(w_now)
                      and effect.downwind(site, (float(s[2]), float(s[3])), effect._mean_dir(w_now))), None)
         if pick is None:
             res = {"verdict": "insufficient", "during": None, "baseline": None, "change_pct": None, "days": 0,
-                   "note": "no real station downwind within 4 km in the window"}
+                   "note": "no real station or node downwind within 4 km in the window"}
         else:
-            pm = db.read_frame(conn, """select ts, pm10 from readings where station_id=%s and not synthetic
-                                         and ts > %s and ts < %s""", (pick[0], (start - pd.Timedelta(days=effect.LOOKBACK_DAYS + 1)).to_pydatetime(),
-                                                                     end.to_pydatetime()))
+            series = ("select ts, pm10 from node_hourly where node_id=%s and ts > %s and ts < %s" if pick[4] == "node" else
+                      "select ts, pm10 from readings where station_id=%s and not synthetic and ts > %s and ts < %s")
+            pm = db.read_frame(conn, series, (pick[0], (start - pd.Timedelta(days=effect.LOOKBACK_DAYS + 1)).to_pydatetime(),
+                                              end.to_pydatetime()))
             pm["ts"] = pd.to_datetime(pm["ts"], utc=True)
             res = effect.assess(pm.set_index("ts")["pm10"].astype(float), wind, (start, end))
             res["note"] = f"{pick[1]}: {res['note']}"
-        conn.execute("""insert into verifications (action_id, case_id, site_id, action, station_id, window_start, window_end,
-                        during, baseline, change_pct, days, verdict, note, checked_at)
-                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        on conflict (action_id) do update set station_id=excluded.station_id, during=excluded.during,
+        conn.execute("""insert into verifications (action_id, case_id, site_id, action, station_id, node_id, window_start,
+                        window_end, during, baseline, change_pct, days, verdict, note, checked_at)
+                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        on conflict (action_id) do update set station_id=excluded.station_id, node_id=excluded.node_id,
+                        during=excluded.during,
                         baseline=excluded.baseline, change_pct=excluded.change_pct, days=excluded.days,
                         verdict=excluded.verdict, note=excluded.note, checked_at=excluded.checked_at""",
-                     (aid, cid, site_id, action, pick[0] if pick else None, start.to_pydatetime(), end.to_pydatetime(),
+                     (aid, cid, site_id, action, pick[0] if pick and pick[4] == "station" else None,
+                      pick[0] if pick and pick[4] == "node" else None, start.to_pydatetime(), end.to_pydatetime(),
                       res["during"], res["baseline"], res["change_pct"], res["days"], res["verdict"], res["note"],
                       now.to_pydatetime()))
         if res["verdict"] == "drop":
