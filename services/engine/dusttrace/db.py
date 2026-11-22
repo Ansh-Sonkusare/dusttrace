@@ -104,7 +104,7 @@ def hot_node_sites(conn, ward_id: str, now, hours: int = 6, threshold: float = 1
                              join node_hourly h on h.node_id = n.id
                              join exposures e on e.receptor_id = n.receptor_id and e.ts = h.ts
                             where n.ward_id=%s and n.active and h.ts > %s and h.ts <= %s and h.pm10 > %s
-                              and e.run_id = (select r.id from runs r where r.ward_id = n.ward_id and r.issued_at <= h.ts
+                              and e.run_id = (select r.id from runs r where r.ward_id = n.ward_id and r.issued_at < h.ts
                                                order by r.issued_at desc, r.id desc limit 1)""",
                         (ward_id, (now - pd.Timedelta(hours=hours)).to_pydatetime(), now.to_pydatetime(), threshold)).fetchall()
     return {r[0] for r in rows}

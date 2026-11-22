@@ -588,6 +588,9 @@ def test_the_receptor_signal_goes_to_the_site_whose_plume_was_there_when_the_nod
     _node_with_hours(conn, "node-at-school", 19.11, 72.86, now, {hot_hour: 150.0}, receptor_id=rid)
     _past_exposure(conn, "A", rid, hot_hour, issued=now - pd.Timedelta(hours=6))                       # A's plume, that hour
     _past_exposure(conn, "B", rid, now - pd.Timedelta(hours=20), issued=now - pd.Timedelta(hours=24))  # B's, a day earlier
+    # Hourly runs: one issued exactly at the hot hour forecasts only the hours after it, so it isn't the
+    # forecast in force at that hour.
+    _past_exposure(conn, "C", rid, hot_hour + pd.Timedelta(hours=1), issued=hot_hour)
     assert db.hot_node_sites(conn, "K-East", now) == {"A"}
 
 
