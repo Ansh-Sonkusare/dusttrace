@@ -265,6 +265,12 @@ def run(conn, settings: Settings) -> dict:
     metrics_extra = {"dry_windy_hours": len(windy)}
     metrics_extra["verified"] = verify_actions(conn, ward_id, now_hour())
     states = respond(conn, ward_id, run_id, now_hour(), hours, recs, ward_fc, audits, hot, sites, sigs, windy)
+    metrics_extra["evidence"] = {  # what D8 and D10 saw this run, hour by hour (issue #56)
+        s.ctx.site_id: {"exceedances_7d": s.ctx.exceedances_7d, "ignored_windows": s.ctx.ignored_windows,
+                        "non_construction": s.ctx.non_construction,
+                        "days": {x["date"]: {"cause": x["cause"], "hours": [{**h, "ts": h["ts"].isoformat()} for h in x["hours"]]}
+                                 for x in s.ctx.exceedance_days}}
+        for s in states if s.ctx.exceedance_days or s.ctx.ignored_windows}
     conn.execute("update runs set metrics = metrics || %s where id=%s", (Jsonb(metrics_extra), run_id))
     db.write_alerts(conn, run_id, alerts.derive(states))
     conn.commit()
@@ -334,7 +340,7 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
     decide, and update the site's open case. Returns each site's state for the ward alerts (F11)."""
     names = recs.set_index("id")["name"].to_dict()
     kinds = recs.set_index("id")["kind"].to_dict()
-    sites = db.read_frame(conn, """select s.id, s.name, s.activity, s.lat, s.lon, n.id is not null as has_sensor,
+    sites = db.read_frame(conn, """select s.id, s.name, s.activity, s.lat, s.lon, s.area_m2, n.id is not null as has_sensor,
                                           coalesce(n.has_relay, false) as has_relay
                                      from sites s left join site_sensors n on n.site_id = s.id
                                     where s.ward_id=%s and s.active order by s.id""", (ward_id,))
@@ -344,9 +350,8 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
     else:
         known = {}
     trust = {a.site_id: a.score for a in audits}
-    signals = db.site_signals(conn, ward_id)
+    evidence, _ = rule_evidence(conn, ward_id, sites, now, db.site_signals(conn, ward_id))
     accepted = db.plans_accepted_today(conn, ward_id)
-    hot_sites = db.hot_node_sites(conn, ward_id, now)
     states = []
     for s in sites.itertuples():
         # Only hours when dusty work is allowed (06:00-22:00 IST) can need a site to act.
@@ -366,10 +371,7 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
                                           for r, c in h.exposures if kinds.get(r) in ("school", "hospital")),
             sensor_hot_hours=hot.get(s.id, 0),
             pending_requests=db.pending_requests(conn, s.id),
-            citizen_reports=signals.get(s.id, {}).get("reports", 0),
-            confirmed_violation=signals.get(s.id, {}).get("confirmed_violation", False),
-            satellite_active=signals.get(s.id, {}).get("satellite", False),
-            receptor_node_hot=s.id in hot_sites,
+            **evidence[s.id],
         )
         decision = agent.decide(ctx)
         case_id = db.write_case(conn, run_id, s.id, decision)
@@ -377,6 +379,75 @@ def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.
         states.append(alerts.SiteState(ctx, decision, case_id, s.id in accepted,
                                        avoid_now=first is not None and first.status == "avoid"))
     return states
+
+
+WEEK = pd.Timedelta(days=7)
+
+
+def rule_evidence(conn, ward_id: str, sites: pd.DataFrame, now: pd.Timestamp, signals: dict) -> tuple[dict, dict]:
+    """Per site, the SiteContext fields the evidence rules read (D1, D6-D10), from data up to `now` only, and
+    the measured station hours behind D8 (issue #56). `signals` is `db.site_signals` as of the same moment."""
+    st = db.read_frame(conn, "select id, name, lat, lon from stations where ward_id=%s and source <> 'seed'", (ward_id,))
+    stations = [{"id": r.id, "name": r.name, "lat": float(r.lat), "lon": float(r.lon)} for r in st.itertuples()]
+    rd = db.read_frame(conn, """select r.station_id, r.ts, r.pm10, r.pm25, r.synthetic from readings r
+                                 join stations s on s.id = r.station_id
+                                where s.ward_id=%s and s.source <> 'seed' and not r.synthetic and r.pm10 is not null
+                                  and r.ts > %s and r.ts <= %s""",
+                       (ward_id, (now - WEEK - pd.Timedelta(days=signature.BASE_DAYS)).to_pydatetime(), now.to_pydatetime()))
+    wx = db.read_frame(conn, """select ts, wind_speed, wind_dir, blh, synthetic, is_forecast from weather_hourly
+                                 where ward_id=%s and ts > %s and ts <= %s""",
+                       (ward_id, (now - WEEK).to_pydatetime(), now.to_pydatetime()))
+    for f in (rd, wx):
+        f["ts"] = pd.to_datetime(f["ts"], utc=True)
+    rd[["pm10", "pm25"]] = rd[["pm10", "pm25"]].astype(float)
+    wx[["wind_speed", "wind_dir", "blh"]] = wx[["wind_speed", "wind_dir", "blh"]].astype(float)
+    site_list = [{"id": r.id, "lat": float(r.lat), "lon": float(r.lon), "area_m2": float(r.area_m2),
+                  "activity": r.activity} for r in sites.itertuples()]
+    att = attribution.measured_exceedances(site_list, stations, attribution.local_exceedances(rd), wx, now)
+    base = signature.baselines(rd, now - WEEK)
+    hot = db.hot_node_sites(conn, ward_id, now)
+    hot_sensitive = db.hot_node_sites(conn, ward_id, now, kinds=["school", "hospital"])
+    ignored = db.ignored_windows(conn, ward_id, now)
+    out = {}
+    for s in site_list:
+        days = attribution.by_ist_day(att[s["id"]])
+        causes = signature.day_causes(days, base)
+        sig = signals.get(s["id"], {})
+        out[s["id"]] = dict(
+            exceedances_7d=len(days),
+            exceedance_days=[{**max(h, key=lambda x: x["pm10"]), "date": d, "hours": h, "cause": causes[d]}
+                             for d, h in days.items()],
+            non_construction=signature.non_construction(causes), ignored_windows=ignored.get(s["id"], 0),
+            referred=sig.get("referred", False), citizen_reports=sig.get("reports", 0),
+            confirmed_violation=sig.get("confirmed_violation", False), satellite_active=sig.get("satellite", False),
+            receptor_node_hot=s["id"] in hot, sensitive_node_hot=s["id"] in hot_sensitive)
+    return out, att
+
+
+def replay_rules(conn, settings: Settings, as_of: pd.Timestamp) -> dict:
+    """The evidence rules (D1, D6-D10) as of a past hour, on data up to `as_of` only and with no forecast:
+    for weeks the live feed no longer covers (issue #56). Writes nothing."""
+    ward_id = settings.ward_id
+    sites = db.read_frame(conn, """select s.id, s.name, s.activity, s.lat, s.lon, s.area_m2, s.demo, s.source,
+                                          s.sensor_status <> 'not_connected' as sensor_known,
+                                          n.id is not null as has_sensor, coalesce(n.has_relay, false) as has_relay
+                                     from sites s left join site_sensors n on n.site_id = s.id
+                                    where s.ward_id=%s and s.active and (%s or not s.demo) order by s.id""",
+                          (ward_id, db.demo_sites()))
+    evidence, att = rule_evidence(conn, ward_id, sites, as_of, db.site_signals(conn, ward_id, as_of))
+    out = []
+    for s in sites.itertuples():
+        ctx = agent.SiteContext(site_id=s.id, name=s.name, activity=s.activity, has_sensor=bool(s.has_sensor),
+                                has_relay=bool(s.has_relay), trust=None, now=as_of, sensor_known=bool(s.sensor_known),
+                                **evidence[s.id])
+        d = agent.decide(ctx)
+        out.append({"site_id": s.id, "name": s.name, "demo": bool(s.demo), "source": s.source,
+                    "exceedance_days": ctx.exceedances_7d, "non_construction": ctx.non_construction,
+                    "ignored_windows": ctx.ignored_windows, "hours": att[s.id],
+                    "signals": d.signals if d else [], "triggers": d.triggers if d else [],
+                    "actions": [{"action": a.action, "route": a.route, "rule": a.rule, "status": a.status, "reason": a.reason}
+                                for a in d.final] if d else []})
+    return {"ward": ward_id, "as_of": as_of.isoformat(), "sites": out}
 
 
 FILL_MAX_STALE = pd.Timedelta(days=30)  # a station silent for longer is treated as closed, not filled
@@ -503,10 +574,11 @@ def verify_actions(conn, ward_id: str, now: pd.Timestamp) -> dict:
                       res["during"], res["baseline"], res["change_pct"], res["days"], res["verdict"], res["note"],
                       now.to_pydatetime()))
         if res["verdict"] == "drop":
-            conn.execute("""update cases set state='DONE', closed_at=now(), updated_at=now(), stop_reason=%s
-                            where id=%s and closed_at is null""",
-                         (f"Verified: PM10 at {pick[1]} was {abs(res['change_pct']):.0f}% below comparable days "
-                          f"after {action.replace('_', ' ').lower()}.", cid))
+            why = (f"Verified: PM10 at {pick[1]} was {abs(res['change_pct']):.0f}% below comparable days "
+                   f"after {action.replace('_', ' ').lower()}.")
+            if conn.execute("""update cases set state='DONE', closed_at=now(), updated_at=now(), stop_reason=%s
+                               where id=%s and closed_at is null""", (why, cid)).rowcount:
+                db.write_actions(conn, cid, "final", [agent.verified_close(why)])
         counts["checked"] += 1
         counts[res["verdict"]] += 1
     conn.commit()

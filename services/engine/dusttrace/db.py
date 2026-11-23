@@ -86,27 +86,32 @@ def add_node(conn, n: dict, ward_id: str) -> str:
     """Provision a DustTrace Node, or rotate its key. Returns the key: shown once, stored only as SHA-256."""
     key = secrets.token_urlsafe(32)
     conn.execute(
-        """insert into nodes (id, ward_id, name, host_kind, receptor_id, lat, lon, key_hash)
-           values (%s,%s,%s,%s,%s,%s,%s,%s)
+        """insert into nodes (id, ward_id, name, host_kind, receptor_id, site_id, lat, lon, key_hash)
+           values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
            on conflict (id) do update set ward_id=excluded.ward_id, name=excluded.name, host_kind=excluded.host_kind,
-           receptor_id=excluded.receptor_id, lat=excluded.lat, lon=excluded.lon, key_hash=excluded.key_hash, active=true""",
-        (n["id"], ward_id, n["name"], n["host_kind"], n.get("receptor_id"), n["lat"], n["lon"],
+           receptor_id=excluded.receptor_id, site_id=excluded.site_id, lat=excluded.lat, lon=excluded.lon,
+           key_hash=excluded.key_hash, active=true""",
+        (n["id"], ward_id, n["name"], n["host_kind"], n.get("receptor_id"), n.get("site_id"), n["lat"], n["lon"],
          hashlib.sha256(key.encode()).hexdigest()),
     )
     return key
 
 
-def hot_node_sites(conn, ward_id: str, now, hours: int = 6, threshold: float = 100.0) -> set[str]:
+def hot_node_sites(conn, ward_id: str, now, hours: int = 6, threshold: float = 100.0,
+                   kinds: list[str] | None = None) -> set[str]:
     """Sites whose plume, in the forecast in force at the time, reached a receptor in an hour when that
-    receptor's DustTrace Node read PM10 above the threshold, within the last few hours."""
+    receptor's DustTrace Node read PM10 above the threshold, within the last few hours. `kinds` limits
+    it to nodes hosted by those kinds of place (a school or hospital node is a D-rule trigger)."""
     rows = conn.execute("""select distinct e.site_id
                              from nodes n
                              join node_hourly h on h.node_id = n.id
                              join exposures e on e.receptor_id = n.receptor_id and e.ts = h.ts
                             where n.ward_id=%s and n.active and h.ts > %s and h.ts <= %s and h.pm10 > %s
+                              and (%s::text[] is null or n.host_kind = any(%s::text[]))
                               and e.run_id = (select r.id from runs r where r.ward_id = n.ward_id and r.issued_at < h.ts
                                                order by r.issued_at desc, r.id desc limit 1)""",
-                        (ward_id, (now - pd.Timedelta(hours=hours)).to_pydatetime(), now.to_pydatetime(), threshold)).fetchall()
+                        (ward_id, (now - pd.Timedelta(hours=hours)).to_pydatetime(), now.to_pydatetime(), threshold,
+                         kinds, kinds)).fetchall()
     return {r[0] for r in rows}
 
 
@@ -299,20 +304,59 @@ def write_audits(conn, run_id: int, results) -> None:
         )
 
 
-def site_signals(conn, ward_id: str) -> dict:
+def site_signals(conn, ward_id: str, now=None) -> dict:
     """Per site: citizen reports in 7 days (not rejected) and verified ones in 30 days; confirmed
-    violations in 30 and 90 days, and whether an officer confirmed one in the last 7 days."""
-    rows = conn.execute("""select s.id,
-            (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > now() - interval '30 days'),
-            (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > now() - interval '7 days'),
-            (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > now() - interval '90 days'),
-            (select count(*) from citizen_reports c where c.site_id=s.id and c.status <> 'rejected' and c.at > now() - interval '7 days'),
-            (select count(*) from citizen_reports c where c.site_id=s.id and c.status = 'verified' and c.at > now() - interval '30 days'),
+    violations in 30 and 90 days, whether an officer confirmed one in the last 7 days, and whether an
+    officer approved a D10 referral in the last 7 days. As of `now` (default: the database clock);
+    nothing after it counts."""
+    rows = conn.execute("""with t as (select coalesce(%s::timestamptz, now()) as now)
+        select s.id,
+            (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > t.now - interval '30 days' and i.at <= t.now),
+            (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > t.now - interval '7 days' and i.at <= t.now),
+            (select count(*) from inspections i where i.site_id=s.id and i.outcome='violation' and i.at > t.now - interval '90 days' and i.at <= t.now),
+            (select count(*) from citizen_reports c where c.site_id=s.id and c.status <> 'rejected' and c.at > t.now - interval '7 days' and c.at <= t.now),
+            (select count(*) from citizen_reports c where c.site_id=s.id and c.status = 'verified' and c.at > t.now - interval '30 days' and c.at <= t.now),
             exists (select 1 from site_candidates k where k.site_id=s.id and k.status <> 'rejected'
-                      and k.found_at > now() - interval '120 days')
-          from sites s where s.ward_id=%s""", (ward_id,)).fetchall()
+                      and k.found_at > t.now - interval '120 days' and k.found_at <= t.now),
+            exists (select 1 from case_actions a join cases c on c.id = a.case_id where c.site_id=s.id
+                      and a.action='REFER_NON_CONSTRUCTION' and a.status='approved'
+                      and a.decided_at > t.now - interval '7 days' and a.decided_at <= t.now)
+          from sites s, t where s.ward_id=%s""", (now.to_pydatetime() if now is not None else None, ward_id)).fetchall()
     return {r[0]: {"reports": int(r[4]), "verified_reports": int(r[5]), "violations": int(r[1]),
-                   "violations_90d": int(r[3]), "confirmed_violation": r[2] > 0, "satellite": bool(r[6])} for r in rows}
+                   "violations_90d": int(r[3]), "confirmed_violation": r[2] > 0, "satellite": bool(r[6]),
+                   "referred": bool(r[7])} for r in rows}
+
+
+def ignored_windows(conn, ward_id: str, now, days: int = 7) -> dict:
+    """D8 (issue #56), per site: IST days in the last `days` with an Avoid hour (06:00-22:00 IST) of a plan the
+    site manager had accepted before that hour, in which the DustTrace Node at the site's gate read PM10 above
+    twice the ambient (D4's test; ambient is the mean of the ward's measured station readings that hour).
+    Silence is not evidence: no accepted plan, no gate node, no node reading or no measured ambient counts
+    as followed. The BMC site-sensor feed is simulated today, so it is not used."""
+    rows = conn.execute("""
+        with given as (
+          select distinct p.site_id, w.ts
+            from plan_acceptances p
+            join runs r on r.id = p.run_id
+            join safe_windows w on w.run_id = p.run_id and w.site_id = p.site_id and w.status = 'avoid'
+           where r.ward_id = %(ward)s and p.accepted_at <= w.ts
+             and w.ts > r.issued_at and w.ts <= r.issued_at + interval '24 hours'
+             and w.ts > %(since)s and w.ts <= %(now)s
+             and extract(hour from w.ts at time zone 'Asia/Kolkata') between 6 and 21),
+        ambient as (
+          select r.ts, avg(r.pm10) as pm10 from readings r join stations st on st.id = r.station_id
+           where st.ward_id = %(ward)s and not r.synthetic and r.pm10 is not null
+             and r.ts > %(since)s and r.ts <= %(now)s
+           group by r.ts)
+        select g.site_id, count(distinct (g.ts at time zone 'Asia/Kolkata')::date)
+          from given g
+          join nodes n on n.site_id = g.site_id and n.host_kind = 'site_gate'
+          join node_hourly h on h.node_id = n.id and h.ts = g.ts
+          join ambient a on a.ts = g.ts
+         where h.pm10 > 2 * a.pm10
+         group by g.site_id""",
+        {"ward": ward_id, "now": now.to_pydatetime(), "since": (now - pd.Timedelta(days=days)).to_pydatetime()}).fetchall()
+    return {r[0]: int(r[1]) for r in rows}
 
 
 def write_ranking(conn, run_id: int, ranked) -> None:
@@ -331,15 +375,31 @@ def pending_requests(conn, site_id: str) -> list[dict]:
     return [{"action": r[0], "deadline": r[1]} for r in rows]
 
 
+def write_actions(conn, case_id: int, phase: str, acts) -> None:
+    """Record actions on a case. An action already there keeps its status and deadline."""
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into case_actions (case_id, phase, action, type, route, rule, reason, status, at, deadline)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               on conflict (case_id, phase, action, rule) do update set reason=excluded.reason, at=excluded.at""",
+            [(case_id, phase, a.action, a.type, a.route, a.rule, a.reason, a.status,
+              a.at.to_pydatetime() if a.at is not None else None,
+              a.deadline.to_pydatetime() if a.deadline is not None else None) for a in acts],
+        )
+
+
 def write_case(conn, run_id: int, site_id: str, d) -> int | None:
-    """Update the site's open case with this run's decision, or open one; close it when nothing triggers.
-    Existing actions keep their status and deadline, so officer decisions and D7 clocks survive runs.
+    """Update the site's open case with this run's decision, or open one; close it when nothing triggers,
+    or when the decision closes it (D10 after an approved referral). Existing actions keep their status and
+    deadline, so officer decisions and D7 clocks survive runs.
     Returns the open case id, or None when there is no open case."""
     row = conn.execute("select id from cases where site_id=%s and closed_at is null", (site_id,)).fetchone()
     if d is None:
         if row:
             conn.execute("""update cases set state='DONE', closed_at=now(), updated_at=now(), last_run_id=%s,
                             stop_reason='Nothing triggers in the latest run.' where id=%s""", (run_id, row[0]))
+        return None
+    if d.state == "DONE" and not row:  # already closed with no action; don't open a case just to close it
         return None
     vals = (d.state, d.triggers, d.signals, json.dumps(d.hypotheses), d.what_changed, d.stop_reason, run_id)
     if row:
@@ -350,19 +410,14 @@ def write_case(conn, run_id: int, site_id: str, d) -> int | None:
         case_id = conn.execute("""insert into cases (state, triggers, signals, hypotheses, what_changed, stop_reason,
                                   last_run_id, opened_run_id, site_id) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                                   returning id""", (*vals, run_id, site_id)).fetchone()[0]
-    with conn.cursor() as cur:
-        for phase, acts in (("initial", d.initial), ("final", d.final)):
-            cur.executemany(
-                """insert into case_actions (case_id, phase, action, type, route, rule, reason, status, at, deadline)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                   on conflict (case_id, phase, action, rule) do update set reason=excluded.reason, at=excluded.at""",
-                [(case_id, phase, a.action, a.type, a.route, a.rule, a.reason, a.status,
-                  a.at.to_pydatetime() if a.at is not None else None,
-                  a.deadline.to_pydatetime() if a.deadline is not None else None) for a in acts],
-            )
+    write_actions(conn, case_id, "initial", d.initial)
+    write_actions(conn, case_id, "final", d.final)
     if d.expired:
         conn.execute("""update case_actions set status='expired' where case_id=%s and status='requested'
                         and action = any(%s)""", (case_id, d.expired))
+    if d.state == "DONE":
+        conn.execute("update cases set closed_at=now() where id=%s", (case_id,))
+        return None
     return case_id
 
 

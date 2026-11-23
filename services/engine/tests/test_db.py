@@ -613,3 +613,221 @@ def test_a_node_without_history_does_not_take_the_verdict_from_a_station(conn, s
     conn.commit()                              # 0.5 km downwind, no readings yet
     assert pipeline.verify_actions(conn, "K-East", now)["drop"] == 1
     assert one(conn, "select station_id, node_id from verifications where action_id=%s", (aid,)) == ("openaq-11", None)
+
+
+# Issue #56: D8, D9 and D10 on measured station data.
+WORKS = {"id": "osm-way-101", "name": "Metro works", "activity": "excavation", "lat": 19.1172, "lon": 72.8561,
+         "area_m2": 9000, "source": "osm", "demo": False}
+
+
+def _background_stations(conn, ts):
+    """Two real stations 5-6 km away at 60 µg/m³: the rest of the network a local exceedance must stand above."""
+    for sid, lat, lon in (("openaq-24", 19.085, 72.84), ("openaq-25", 19.16, 72.92)):
+        db.upsert_station(conn, {"id": sid, "name": sid, "source": "openaq", "lat": lat, "lon": lon}, "K-East")
+        db.write_readings(conn, pd.DataFrame({"station_id": sid, "ts": ts, "pm10": 60.0, "pm25": 24.0}), synthetic=False)
+
+
+def _works_upwind_of_a_station(conn, days_ago, ratio=0.2, synthetic=False):
+    """A real OSM site 300 m west of a real station under a measured westerly, so its plume adds 20-40 µg/m³
+    there. The station's PM10 sits at 60 (PM2.5/PM10 0.4) except one hour on each of `days_ago`, when it reads
+    140 with PM2.5/PM10 `ratio`."""
+    db.upsert_sites(conn, [WORKS], "K-East")
+    db.upsert_station(conn, {"id": "openaq-21", "name": "East of the works", "source": "openaq",
+                             "lat": 19.1172, "lon": 72.8590}, "K-East")
+    now = pipeline.now_hour()
+    ts = pd.date_range(end=now, periods=24 * 40, freq="h", tz="UTC")
+    wx = pd.DataFrame({"ts": ts[-24 * 9:], "wind_speed": 3.0, "wind_dir": 270.0, "blh": 600.0, "temp": 30.0,
+                       "rh": 60.0, "precip": 0.0})
+    db.write_weather(conn, "K-East", wx, now, synthetic=False)
+    pm10, pm25 = pd.Series(60.0, index=ts), pd.Series(24.0, index=ts)
+    for d in days_ago:
+        t = now - pd.Timedelta(days=d, hours=2)
+        pm10[t], pm25[t] = 140.0, 140.0 * ratio
+    db.write_readings(conn, pd.DataFrame({"station_id": "openaq-21", "ts": ts, "pm10": pm10.to_numpy(),
+                                          "pm25": pm25.to_numpy()}), synthetic=synthetic)
+    _background_stations(conn, ts)
+    conn.commit()
+    return now
+
+
+def _report(conn, site="osm-way-101", ago="1 day"):
+    conn.execute("insert into citizen_reports (site_id, kind, at) values (%s, 'dry_excavation', now() - %s::interval)",
+                 (site, ago))
+    conn.commit()
+
+
+def test_d8_three_days_of_measured_exceedances_downwind_propose_a_notice_to_the_officer(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    _works_upwind_of_a_station(conn, days_ago=[1, 3, 5])
+    _report(conn)  # D1: a second, independent signal
+    out = pipeline.run(conn, settings)
+    ev = one(conn, "select metrics->'evidence'->'osm-way-101' from runs where id=%s", (out["run_id"],))[0]
+    assert ev["exceedances_7d"] == 3 and ev["non_construction"] is False and len(ev["days"]) == 3
+    hours = [h for d in ev["days"].values() for h in d["hours"]]  # the station hours and winds behind each day
+    assert {(h["station"], h["pm10"], h["background"], h["wind_dir"], h["wind_speed"]) for h in hours} == \
+        {("East of the works", 140.0, 60.0, 270, 3.0)}
+    # What the Cases page lists: the ward's open cases with their actions; a proposed one gets Approve / Decline.
+    rows = conn.execute("""select c.state, a.route, a.rule, a.status, a.reason from cases c join sites s on s.id = c.site_id
+                             join case_actions a on a.case_id = c.id
+                            where c.closed_at is null and s.ward_id='K-East' and c.site_id='osm-way-101'
+                              and a.phase='final' and a.action='ISSUE_NOTICE'""").fetchall()
+    assert len(rows) == 1
+    state, route, rule, status, reason = rows[0]
+    assert (state, route, rule, status) == ("APPROVAL_ROUTING", "L1", "D8", "proposed")
+    assert "on 3 days in 7" in reason and "East of the works 140 µg/m³ against 60 µg/m³ at the other stations" in reason
+    assert "from this site's plume" in reason and "wind from 270° at 3.0 m/s" in reason
+    assert "station attribution" in one(conn, "select signals from cases where site_id='osm-way-101' and closed_at is null")[0]
+
+
+def test_city_wide_haze_is_not_attributed_to_a_site(conn, settings):
+    now = _works_upwind_of_a_station(conn, days_ago=[1, 3, 5])
+    sites = db.read_sites(conn, "K-East")
+    ev, _ = pipeline.rule_evidence(conn, "K-East", sites, now, db.site_signals(conn, "K-East"))
+    assert ev["osm-way-101"]["exceedances_7d"] == 3 and ev["osm-way-101"]["exceedance_days"][0]["background"] == 60.0
+    # The same three hours, but the whole network was as high: regional haze, nothing local to attribute.
+    hazy = [(now - pd.Timedelta(days=d, hours=2)).to_pydatetime() for d in (1, 3, 5)]
+    conn.execute("update readings set pm10 = 140 where station_id in ('openaq-24', 'openaq-25') and ts = any(%s)", (hazy,))
+    conn.commit()
+    ev, _ = pipeline.rule_evidence(conn, "K-East", sites, now, db.site_signals(conn, "K-East"))
+    assert ev["osm-way-101"]["exceedances_7d"] == 0
+
+
+def test_d8_two_days_of_measured_exceedances_are_not_enough(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    _works_upwind_of_a_station(conn, days_ago=[1, 3])
+    _report(conn)
+    pipeline.run(conn, settings)
+    assert not conn.execute("""select 1 from case_actions a join cases c on c.id = a.case_id
+                                where c.site_id='osm-way-101' and a.action='ISSUE_NOTICE'""").fetchall()
+    assert "repeat_exceedance" not in one(conn, "select triggers from cases where site_id='osm-way-101' and closed_at is null")[0]
+
+
+def test_d8_never_counts_synthetic_or_cams_filled_hours(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    _works_upwind_of_a_station(conn, days_ago=[1, 3, 5], synthetic=True)  # the same spikes, but synthetic
+    # A real station beside it whose feed stopped 4 days ago; CAMS since then corrects to about 300 µg/m³.
+    db.upsert_station(conn, {"id": "openaq-22", "name": "Stale beside it", "source": "openaq",
+                             "lat": 19.1172, "lon": 72.8590}, "K-East")
+    now = pipeline.now_hour()
+    ts = pd.date_range(end=now, periods=24 * 70, freq="h", tz="UTC")
+    truth = pd.Series(np.where(ts > now - pd.Timedelta(hours=96), 300.0, 60.0 + 10 * np.sin(np.arange(len(ts)) / 24 * 2 * np.pi)), index=ts)
+    real = truth[ts <= now - pd.Timedelta(hours=96)]
+    db.write_readings(conn, pd.DataFrame({"station_id": "openaq-22", "ts": real.index, "pm10": real.to_numpy(),
+                                          "pm25": real.to_numpy() * 0.4}), synthetic=False)
+    db.write_cams(conn, pd.DataFrame({"station_id": "openaq-22", "ts": ts, "pm10": truth.to_numpy() * 0.6, "pm25": None}))
+    _report(conn)
+    conn.commit()
+    out = pipeline.run(conn, settings)
+    assert out["metrics"]["filled"]["stations"] == 1  # the stale station was filled, far above 100 ...
+    triggers = one(conn, "select triggers from cases where site_id='osm-way-101' and closed_at is null")[0]
+    assert "repeat_exceedance" not in triggers        # ... and neither kind of hour counted
+    sites = db.read_sites(conn, "K-East")
+    ev, att = pipeline.rule_evidence(conn, "K-East", sites, now, db.site_signals(conn, "K-East"))
+    assert ev["osm-way-101"]["exceedances_7d"] == 0 and att["osm-way-101"] == []
+
+
+def test_d10_pm25_carried_exceedances_are_referred_and_the_case_closes_once_approved(conn, settings):
+    from dusttrace import agent
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    _works_upwind_of_a_station(conn, days_ago=[1, 3, 5], ratio=0.75)  # PM2.5 carried every spike: combustion
+    _report(conn)
+    pipeline.run(conn, settings)
+    acts = _case_actions(conn, "osm-way-101")
+    assert acts[("REFER_NON_CONSTRUCTION", "D10")] == "proposed"
+    assert not {a for a, _ in acts} & (agent.SITE_ACTIONS | agent.ENFORCEMENT_FROM_CAUSE)
+    reason = one(conn, """select a.reason from case_actions a join cases c on c.id = a.case_id where c.site_id='osm-way-101'
+                           and a.action='REFER_NON_CONSTRUCTION'""")[0]
+    assert "PM2.5 carried the PM10 spikes on 3 of the 3 days" in reason and "East of the works" in reason
+
+    conn.execute("""update case_actions set status='approved', decided_by='test', decided_at=now()
+                     where action='REFER_NON_CONSTRUCTION'""")
+    conn.commit()
+    pipeline.run(conn, settings)
+    closed = one(conn, """select c.id, c.state, c.closed_at is not null from cases c where c.site_id='osm-way-101'""")
+    assert closed[1:] == ("DONE", True)
+    close = one(conn, "select route, rule, status from case_actions where case_id=%s and action='CLOSE_NO_ACTION'", (closed[0],))
+    assert close == ("auto", "D10", "done")
+    pipeline.run(conn, settings)  # still referred: no new case is opened for the site
+    assert one(conn, "select count(*) from cases where site_id='osm-way-101'")[0] == 1
+
+
+def test_a_verified_drop_is_recorded_as_close_no_action(conn, settings):
+    now = pipeline.now_hour()
+    cid, _ = _case_with_mist(conn, now - pd.Timedelta(hours=8))
+    _downwind_station(conn, now, during=55.0)
+    pipeline.verify_actions(conn, "K-East", now)
+    row = one(conn, "select route, rule, status, reason from case_actions where case_id=%s and action='CLOSE_NO_ACTION'", (cid,))
+    assert row[:3] == ("auto", "verified drop", "done") and row[3].startswith("Verified: PM10 at East of A")
+
+
+def _accepted_avoid_hour(conn, site, hour, accepted=True):
+    """A run issued 2 h before `hour` gave `site` an Avoid window at `hour`; its manager accepted the plan an hour before."""
+    run_id = db.create_run(conn, "K-East", (hour - pd.Timedelta(hours=2)).to_pydatetime(), "live", "test", {})
+    conn.execute("insert into safe_windows (run_id, site_id, ts, status, reason) values (%s,%s,%s,'avoid','test')",
+                 (run_id, site, hour.to_pydatetime()))
+    if accepted:
+        conn.execute("insert into plan_acceptances (site_id, run_id, avoid_hours, accepted_at) values (%s,%s,1,%s)",
+                     (site, run_id, (hour - pd.Timedelta(hours=1)).to_pydatetime()))
+
+
+def test_d8_a_window_counts_as_ignored_only_on_measured_evidence_at_the_gate(conn, settings):
+    now = pipeline.now_hour()
+    day = lambda k: now.normalize() - pd.Timedelta(days=k) + pd.Timedelta(hours=5)  # 10:30 IST, k days ago
+    db.add_node(conn, {"id": "node-gate-a", "name": "Gate of A", "host_kind": "site_gate", "site_id": "A",
+                       "lat": 19.1172, "lon": 72.8565}, "K-East")
+    db.upsert_station(conn, {"id": "openaq-23", "name": "Ambient", "source": "openaq", "lat": 19.11, "lon": 72.87}, "K-East")
+    gate, ambient = {}, {}
+    for k in (1, 2, 3, 4, 5):
+        _accepted_avoid_hour(conn, "A", day(k), accepted=(k != 4))
+        gate[day(k)], ambient[day(k)] = 200.0, 60.0
+    gate[day(3)] = 100.0           # under twice the ambient: followed
+    del ambient[day(5)]            # no measured ambient that hour: no evidence, so not ignored
+    _accepted_avoid_hour(conn, "B", day(1))  # B has no gate node: silence is not evidence
+    with conn.cursor() as cur:
+        cur.executemany("""insert into node_readings (node_id, ts, pm25_raw, pm10_raw, rh, pm25_corrected, pm10_corrected)
+                           values ('node-gate-a', %s, %s, %s, 0, %s, %s)""",
+                        [(t.to_pydatetime(), v * 0.4, v, v * 0.4, v) for t, v in gate.items()])
+        cur.executemany("insert into readings (station_id, ts, pm10, synthetic) values ('openaq-23', %s, %s, false)",
+                        [(t.to_pydatetime(), v) for t, v in ambient.items()])
+    conn.commit()
+    # Day 1 and day 2 count; day 3 was under 2x, day 4's plan wasn't accepted, day 5 has no ambient.
+    assert db.ignored_windows(conn, "K-East", now) == {"A": 2}
+    assert db.ignored_windows(conn, "K-East", day(2)) == {"A": 1}  # nothing after now is visible
+    ev, _ = pipeline.rule_evidence(conn, "K-East", db.read_sites(conn, "K-East"), now, db.site_signals(conn, "K-East"))
+    assert ev["A"]["ignored_windows"] == 2 and ev["B"]["ignored_windows"] == 0
+
+
+def test_replay_sees_nothing_after_its_as_of_hour_and_writes_nothing(conn, settings):
+    now = _works_upwind_of_a_station(conn, days_ago=[1, 3, 5])
+    _report(conn, ago="1 day")
+    before = one(conn, "select count(*) from cases")[0]
+    past = pipeline.replay_rules(conn, settings, now - pd.Timedelta(days=2))
+    site = next(s for s in past["sites"] if s["site_id"] == "osm-way-101")
+    assert site["exceedance_days"] == 2 and all(h["ts"] <= now - pd.Timedelta(days=2) for h in site["hours"])
+    assert "citizen reports" not in site["signals"] and not any(a["action"] == "ISSUE_NOTICE" for a in site["actions"])
+    today = next(s for s in pipeline.replay_rules(conn, settings, now)["sites"] if s["site_id"] == "osm-way-101")
+    assert today["exceedance_days"] == 3
+    assert {"action": "ISSUE_NOTICE", "route": "L1", "rule": "D8", "status": "proposed"}.items() <= \
+        next(a for a in today["actions"] if a["action"] == "ISSUE_NOTICE").items()
+    assert one(conn, "select count(*) from cases")[0] == before
+
+
+def test_d9_stop_work_is_proposed_to_l2_with_a_confirmed_violation_d8_and_a_school_exposed(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    now = _works_upwind_of_a_station(conn, days_ago=[1, 3, 5])
+    rid = one(conn, "select id from receptors where kind='school' limit 1")[0]
+    hot_hour = now - pd.Timedelta(hours=1)
+    _node_with_hours(conn, "node-at-school", 19.11, 72.86, now, {hot_hour: 150.0}, receptor_id=rid)
+    _past_exposure(conn, "osm-way-101", rid, hot_hour, issued=now - pd.Timedelta(hours=5))
+    pipeline.run(conn, settings)
+    first = _case_actions(conn, "osm-way-101")
+    assert ("RECOMMEND_STOP_WORK", "D9") not in first and first[("ISSUE_NOTICE", "D8")] == "proposed"
+    conn.execute("insert into inspections (site_id, outcome, note, officer) values ('osm-way-101','violation','dry cutting','test')")
+    conn.commit()
+    pipeline.run(conn, settings)
+    acts = _case_actions(conn, "osm-way-101")
+    assert acts[("RECOMMEND_STOP_WORK", "D9")] == "proposed"
+    stop = one(conn, """select a.route from case_actions a join cases c on c.id = a.case_id
+                         where c.site_id='osm-way-101' and a.action='RECOMMEND_STOP_WORK' and a.phase='final'""")
+    assert stop[0] == "L2"
+    assert "node_at_school_or_hospital" in one(conn, "select triggers from cases where site_id='osm-way-101' and closed_at is null")[0]
