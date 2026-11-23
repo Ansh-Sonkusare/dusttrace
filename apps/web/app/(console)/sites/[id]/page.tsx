@@ -6,6 +6,7 @@ import WindowStrip from "@/components/WindowStrip";
 import NoRun from "@/components/Empty";
 import TrustPill from "@/components/TrustPill";
 import { planSecret, signSite } from "@/lib/plan";
+import { calibrationNote } from "@/lib/audit";
 import { getAudits, getDustScores, getLatestRun, getSite, getSiteExposures, getWard, getWindows } from "@/lib/queries";
 import { spans } from "@/lib/mapHours";
 import { ACTIVITY_LABEL, dayHour, FAULT_LABEL, hhmm, istHour, SCORE_BAND, STATUS_LABEL, TRUST_TONE } from "@/lib/format";
@@ -86,7 +87,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 {!audit ? <p className="small muted">No dust monitor registered. An active site without one is added to the inspection list (D6).</p> : (
                   <>
                     <p className="small muted">{audit.vendor ?? "Unknown make"}{audit.has_relay ? ", can switch misting remotely" : ""}. {audit.simulated ? `Simulated from real ambient data; injected fault: ${FAULT_LABEL[audit.injected_fault ?? "none"] ?? audit.injected_fault}.` : "Live feed."}</p>
-                    {audit.reasons.length === 0 ? <p className="small">All six checks passed: it reads above the stations while the site works, tracks the wind, and holds calibration.</p> : (
+                    <p className="small muted">Compared with {audit.station ?? "the nearest station"}. {calibrationNote(audit)} {audit.imagery ? `Sentinel-2 shows the site active (scene of ${audit.imagery}), so it should read higher from 9 am to 6 pm.` : "No Sentinel-2 scene shows the site active, so a missing rise from 9 am to 6 pm isn't counted against the sensor."}</p>
+                    {audit.reasons.length === 0 ? <p className="small">All checks passed: it reads above its nearest station while the site works, tracks the wind, and is calibrated on time.</p> : (
                       <ul className="list">{audit.reasons.map((r) => (
                         <li key={r} className="item"><span className="bar" style={{ background: `var(--${TRUST_TONE[audit.band]})` }} /><div><p style={{ margin: 0 }}>{r}</p></div></li>
                       ))}</ul>

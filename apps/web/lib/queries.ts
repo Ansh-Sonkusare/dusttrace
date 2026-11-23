@@ -1,4 +1,5 @@
 import { q, ward } from "./db";
+import type { AuditBench } from "./audit";
 import { nodeStatus } from "./node";
 
 export type Status = "go" | "caution" | "avoid";
@@ -18,7 +19,7 @@ export interface Run {
     holdout_rows?: number;
     train_rows?: number;
     stations?: string[];
-    audit?: { n: number; precision: number; recall: number; detected?: Record<string, number> };
+    audit?: AuditBench;
     newest_real_reading?: string | null;
     filled?: { stations: number; hours: number; corrections?: Record<string, { slope: number; intercept: number; mae: number; hours: number }> };
     inputs?: { hours: number; real: number; filled: number; synthetic: number };
@@ -35,6 +36,7 @@ export type TrustBand = "trusted" | "check" | "untrusted";
 export interface Audit {
   site_id: string; sensor_id: string; score: number; band: TrustBand; reasons: string[];
   vendor: string | null; has_relay: boolean; simulated: boolean; injected_fault: string | null;
+  calibrated_on: string | null; station: string | null; imagery: string | null;
 }
 export interface WindowRow { site_id: string; ts: string; status: Status; exposed_people: number; sensitive_hit: boolean; reason: string }
 export interface PlumeRow { site_id: string; ts: string; geojson: string | null; max_conc: number }
@@ -152,7 +154,9 @@ export async function getSiteExposures(runId: number, siteId: string) {
 // Sensor trust (F1) from the run's audit, one row per site that has a sensor.
 export async function getAudits(runId: number, siteId?: string): Promise<Audit[]> {
   return q<Audit>(
-    `select a.site_id, a.sensor_id, a.score, a.band, a.reasons, n.vendor, n.has_relay, n.simulated, n.injected_fault
+    `select a.site_id, a.sensor_id, a.score, a.band, a.reasons, n.vendor, n.has_relay, n.simulated, n.injected_fault,
+            a.checks->'calibration'->>'on' as calibrated_on, a.checks->'neighbour'->>'station' as station,
+            to_char((a.checks->'work_signature'->>'imagery')::date, 'FMDD Mon YYYY') as imagery
        from sensor_audits a join site_sensors n on n.id = a.sensor_id
       where a.run_id=$1 and ($2::text is null or a.site_id=$2) order by a.site_id`,
     [runId, siteId ?? null],
