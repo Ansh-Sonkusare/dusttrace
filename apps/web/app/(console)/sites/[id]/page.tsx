@@ -6,7 +6,8 @@ import WindowStrip from "@/components/WindowStrip";
 import NoRun from "@/components/Empty";
 import TrustPill from "@/components/TrustPill";
 import { planSecret, signSite } from "@/lib/plan";
-import { getAudits, getDustScores, getLatestRun, getSite, getSiteExposures, getWard, getWindows } from "@/lib/queries";
+import { getAudits, getDustScores, getExposureAvoided, getLatestRun, getSite, getSiteExposures, getWard, getWindows } from "@/lib/queries";
+import { EXPOSURE_DEFINITION, fmtExposure, moveText } from "@/lib/exposure";
 import { spans } from "@/lib/mapHours";
 import { ACTIVITY_LABEL, dayHour, FAULT_LABEL, hhmm, istHour, SCORE_BAND, STATUS_LABEL, TRUST_TONE } from "@/lib/format";
 
@@ -19,7 +20,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const [ward, run, site] = await Promise.all([getWard(), getLatestRun(), getSite(id)]);
   if (!site) notFound();
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
-  const [rows, exposures, audits, scores] = await Promise.all([getWindows(run.id, id), getSiteExposures(run.id, id), getAudits(run.id, id), getDustScores(run.id, id)]);
+  const [rows, exposures, audits, scores, [ex]] = await Promise.all([getWindows(run.id, id), getSiteExposures(run.id, id), getAudits(run.id, id), getDustScores(run.id, id), getExposureAvoided(run.id, id)]);
   const audit = audits[0];
   const dust = scores[0];
   const day = rows.filter((r) => { const h = istHour(r.ts); return h >= 8 && h < 20; });
@@ -52,10 +53,17 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                       <div>
                         <div className="hd"><b>{STATUS_LABEL[s.status]}</b> {dayHour(s.from)}–{end(s.to)}</div>
                         <p>{s.rows.reduce((a, b) => (b.exposed_people > a.exposed_people ? b : a)).reason}</p>
+                        {s.status === "avoid" && <p style={{ color: "var(--text)" }}>{moveText(s)}</p>}
                       </div>
                     </li>
                   ))}
                 </ul>
+              )}
+              {ex && ex.without_plan > 0 && (
+                <>
+                  <p className="small" style={{ margin: "12px 0 0" }}>Following the plan keeps <b className="tab">{fmtExposure(ex.avoided)}</b> of <span className="tab">{fmtExposure(ex.without_plan)}</span> person·µg/m³·h ({Math.round(ex.avoided_pct ?? 0)}%) of this site&apos;s dust off people over the 48 h; {Math.round(ex.avoided_15_pct ?? 0)}% where it adds 15 µg/m³ or more.{ex.stuck_hours > 0 ? ` ${ex.stuck_hours} Avoid ${ex.stuck_hours === 1 ? "hour has" : "hours have"} no better hour that day.` : ""}</p>
+                  <p className="small muted" style={{ margin: "6px 0 0" }}>{EXPOSURE_DEFINITION}</p>
+                </>
               )}
             </div>
           </section>
