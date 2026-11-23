@@ -6,7 +6,9 @@ environment officer) or L2 (Assistant Commissioner). Guard rails carried over fr
 - D1: no enforcement when the cause rests on one signal; ask for evidence first.
 - D7: a request that isn't answered by its deadline escalates. No reply is ever assumed.
 - D9: stop-work is only ever a proposal to L2, never automatic.
-Only `decide` creates actions; nothing else in the engine may.
+- D10: when a non-construction source is most likely, nothing is asked of the site; the case is referred.
+Only this module creates actions (`decide`, and `verified_close` for a verified drop); nothing else in the
+engine may.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ CATALOG: dict[str, tuple[str, tuple[str, ...], str]] = {
     "RECOMMEND_STOP_WORK": ("enforcement", ("L2",), "D9"),
     "REFER_NON_CONSTRUCTION": ("routing", ("L1",), "D10"),
     "UPDATE_DUST_SCORE": ("record", ("auto",), "every case"),
+    "CLOSE_NO_ACTION": ("close", ("auto",), "D10"),
 }
 ENFORCEMENT_FROM_CAUSE = {"ADD_TO_INSPECTION", "REGISTER_UNSENSORED_SITE", "ISSUE_NOTICE", "RECOMMEND_STOP_WORK"}
 SITE_ACTIONS = {a for a, (_, routes, _) in CATALOG.items() if "site" in routes} | {"ISSUE_SAFE_WORK_WINDOW"}
@@ -42,6 +45,11 @@ EVIDENCE_DEADLINE = pd.Timedelta(hours=3)
 COVER_DEADLINE = pd.Timedelta(hours=2)   # F10: cover debris with green net within 2 hours
 DUSTY_ACTIVITIES = {"excavation", "demolition", "debris"}
 MIST_LEAD = pd.Timedelta(minutes=90)
+# Both only say the wind put the site upwind (of a station, of a receptor); neither shows it was working.
+# D1 counts them as one line of evidence.
+WIND_ONLY = {"plume model", "station attribution"}
+# A notice or stop-work (D8, D9) is about what caused the dust; a missing monitor says nothing about that.
+NOT_A_CAUSE = {"site registry"}
 
 CAUSES = ["dry_excavation", "demolition", "truck_trackout", "uncovered_debris", "sensor_fault",
           "non_construction", "weather_only"]
@@ -68,12 +76,15 @@ class SiteContext:
     sensitive_avoid: list = field(default_factory=list)   # (ts, school/hospital) in an Avoid window
     sensor_hot_hours: int = 0          # latest working hours in a row with site sensor > 2x ambient
     citizen_reports: int = 0           # in the last 7 days
-    exceedances_7d: int = 0            # exceedances attributed to this site in the last 7 days
-    ignored_windows: int = 0           # Avoid windows the site didn't follow
+    exceedances_7d: int = 0            # days in the last 7 a real station measured PM10 > 100 with this site's plume on it
+    exceedance_days: list = field(default_factory=list)  # per such day, its highest hour: station, ts, pm10, wind, cause
+    ignored_windows: int = 0           # Avoid windows the site accepted and was then measured working through
     confirmed_violation: bool = False  # an officer confirmed a violation (inspection outcome)
     non_construction: bool = False     # evidence points to a non-construction source
+    referred: bool = False             # an officer approved a D10 referral for this site in the last 7 days
     satellite_active: bool = False     # Sentinel-2 shows new bare ground at the site (F2)
     receptor_node_hot: bool = False    # a DustTrace Node at a receptor this site's plume reaches read PM10 > 100 (F9)
+    sensitive_node_hot: bool = False   # ... and that receptor is a school or hospital
     sensor_known: bool = True          # False when the site's BMC feed isn't connected: unknown is not "none"
     pm_signature: str | None = None    # nearest real station's PM10/PM2.5 signature: coarse_work | coarse_night | fine | mixed
     pm_station: str | None = None      # that station's name, for the reasons
@@ -128,6 +139,11 @@ def _act(action: str, reason: str, route: str | None = None, rule: str | None = 
     return Action(action, route, rule or default_rule, reason, status, **kw)
 
 
+def verified_close(reason: str) -> Action:
+    """Verify (F12) found PM10 fell after the site's fix, so the case closes; the close is recorded like any action."""
+    return _act("CLOSE_NO_ACTION", reason, rule="verified drop")
+
+
 def hypotheses(c: SiteContext) -> list[tuple[str, float]]:
     w = {k: 0.05 for k in CAUSES}
     for k, v in PRIORS.get(c.activity, {}).items():
@@ -154,8 +170,27 @@ def hypotheses(c: SiteContext) -> list[tuple[str, float]]:
     return sorted(((k, round(v / total, 3)) for k, v in w.items()), key=lambda kv: (-kv[1], kv[0]))
 
 
+def _day(x: dict) -> str:
+    """One attributed day, told by its highest station hour."""
+    ts = pd.Timestamp(x["ts"]) + pd.Timedelta(hours=5.5)
+    n = len(x.get("hours") or [])
+    bg = f" against {round(x['background'])} µg/m³ at the other stations" if x.get("background") is not None else ""
+    share = f", about {round(x['added'])} from this site's plume" if x.get("added") else ""
+    shared = x.get("shared_with") or 0
+    others = f", shared with {shared} other site{'' if shared == 1 else 's'}" if shared else ""
+    return (f"{ts.day} {ts:%b} {ts:%H:%M} IST, {x['station']} {round(x['pm10'])} µg/m³{bg}{share}{others}, "
+            f"wind from {round(x['wind_dir'])}° at {x['wind_speed']} m/s" + (f" ({n} hours)" if n > 1 else ""))
+
+
+def lines(sig: list[str], cause: bool = False) -> list[str]:
+    """Independent lines of evidence: the wind-only signals count once. With `cause`, only lines that speak
+    to what caused the dust count (for D8 and D9)."""
+    sig = [s for s in sig if not (cause and s in NOT_A_CAUSE)]
+    return [s for s in sig if s not in WIND_ONLY] + (["wind"] if WIND_ONLY & set(sig) else [])
+
+
 def signals(c: SiteContext) -> list[str]:
-    """Independent lines of evidence that this site is emitting. D1 needs two for enforcement."""
+    """Lines of evidence that this site is emitting. D1 needs two independent ones (`lines`) for enforcement."""
     s = []
     if c.spike_hours or c.sensitive_avoid:
         s.append("plume model")
@@ -195,6 +230,10 @@ def decide(c: SiteContext) -> Decision | None:
         triggers.append("repeat_exceedance")
     if c.citizen_reports:
         triggers.append("citizen_report")
+    if c.sensitive_node_hot:
+        triggers.append("node_at_school_or_hospital")
+    if c.satellite_active:
+        triggers.append("satellite_find")
     if c.dry_windy_hours and c.activity in DUSTY_ACTIVITIES:
         triggers.append("dry_windy")
     if overdue:
@@ -204,7 +243,7 @@ def decide(c: SiteContext) -> Decision | None:
 
     sig = signals(c)
     hyp = hypotheses(c)
-    receptor_exposure = bool(c.sensitive_avoid or c.spike_receptors)
+    receptor_exposure = bool(c.sensitive_avoid or c.spike_receptors or c.receptor_node_hot)
     acts: list[Action] = []
 
     if "forecast_spike" in triggers:  # D2
@@ -254,9 +293,13 @@ def decide(c: SiteContext) -> Decision | None:
         acts.append(_act("ADD_TO_INSPECTION", "D6: active site with no dust monitor.", rule="D6"))
     repeat = c.exceedances_7d >= 3 or c.ignored_windows >= 2
     if repeat:  # D8
-        why = (f"{c.exceedances_7d} attributed exceedances in 7 days" if c.exceedances_7d >= 3
-               else f"{c.ignored_windows} ignored Safe-Work Windows")
-        acts.append(_act("ISSUE_NOTICE", f"D8: {why}."))
+        why = []
+        if c.exceedances_7d >= 3:
+            why.append(f"a real station measured PM10 above 100 µg/m³ with this site's plume on it on {c.exceedances_7d} "
+                       "days in 7" + "".join(f"; {_day(x)}" for x in c.exceedance_days))
+        if c.ignored_windows >= 2:
+            why.append(f"{c.ignored_windows} ignored Safe-Work Windows")
+        acts.append(_act("ISSUE_NOTICE", f"D8: {' and '.join(why)}."))
     if c.confirmed_violation and repeat and receptor_exposure:  # D9
         acts.append(_act("RECOMMEND_STOP_WORK", "D9: officer-confirmed violation, repeat exceedances and people downwind. "
                                                 "Needs the Assistant Commissioner; never automatic."))
@@ -266,27 +309,41 @@ def decide(c: SiteContext) -> Decision | None:
     final, notes = list(acts), []
     if c.non_construction:  # D10: no site action; refer with the evidence
         final = [a for a in final if a.action not in SITE_ACTIONS | ENFORCEMENT_FROM_CAUSE | {"TRIGGER_MIST_NOW"}]
-        final.insert(0, _act("REFER_NON_CONSTRUCTION", f"D10: {hyp[0][0].replace('_', ' ')} is the most likely cause; "
-                                                       "refer to MPCB or the right BMC department."))
-        notes.append("D10 found a non-construction source most likely, so site actions were dropped and the case is referred.")
-    elif len(sig) < 2:  # D1
-        blocked = [a for a in final if a.action in ENFORCEMENT_FROM_CAUSE and a.rule != "D5"]
+        fine = [x for x in c.exceedance_days if x.get("cause") == "fine"]
+        why = (f"PM2.5 carried the PM10 spikes on {len(fine)} of the {len(c.exceedance_days)} days a station downwind "
+               "measured above 100 µg/m³ (" + "; ".join(_day(x) for x in fine) + "), which points to burning or traffic, "
+               "not construction dust" if fine else f"{hyp[0][0].replace('_', ' ')} is the most likely cause")
+        if not c.referred:
+            final.insert(0, _act("REFER_NON_CONSTRUCTION", f"D10: {why}; refer to MPCB or the right BMC department."))
+            notes.append("D10 found a non-construction source most likely, so site actions were dropped and the case is referred.")
+    else:  # D1
+        blocked = [a for a in final if a.action in ENFORCEMENT_FROM_CAUSE and a.rule != "D5"
+                   and len(lines(sig, cause=a.rule in ("D8", "D9"))) < 2]
         if blocked:
             final = [a for a in final if a not in blocked]
             ask = ("REQUEST_SITE_PHOTO", "a site photo") if c.has_sensor else ("REQUEST_SPOT_CHECK", "an officer spot check")
-            final.insert(0, _act(ask[0], f"D1: the case rests on one signal ({sig[0] if sig else 'none'}); "
+            basis = [s for s in sig if not ({a.rule for a in blocked} & {"D8", "D9"} and s in NOT_A_CAUSE)]
+            one = ((" and ".join(basis) + ", which only place the site upwind") if len(basis) > 1
+                   else (basis[0] if basis else "none"))
+            final.insert(0, _act(ask[0], f"D1: the case rests on one signal ({one}); "
                                          f"{ask[1]} comes before any enforcement.",
                                  deadline=c.now + EVIDENCE_DEADLINE))
             notes.append(f"{', '.join(sorted({a.rule for a in blocked}))} enforcement rests on one signal "
-                         f"({sig[0] if sig else 'none'}), so under D1 {ask[1]} comes first.")
+                         f"({one}), so under D1 {ask[1]} comes first.")
     expired = []
     if overdue:  # D7
         expired = [r["action"] for r in overdue]
         if not any(a.action == "ADD_TO_INSPECTION" for a in final):
             final.insert(0, _act("ADD_TO_INSPECTION", f"D7: {', '.join(expired)} not answered by its deadline.", rule="D7"))
         notes.append(f"No reply to {', '.join(expired)} by its deadline and none was assumed, so D7 adds an L1 inspection.")
+    if c.non_construction and c.referred and not any(a.status in ("proposed", "requested") for a in final):
+        final.insert(0, _act("CLOSE_NO_ACTION", "D10: already referred to MPCB or the right BMC department; "
+                                                "no action at the site."))
+        notes.append("An officer approved the D10 referral, so the case closes with no action at the site.")
 
-    if any(a.status == "proposed" for a in final):
+    if any(a.action == "CLOSE_NO_ACTION" for a in final):
+        state, stop = "DONE", "Closed with no action at the site: referred to MPCB or the right BMC department."
+    elif any(a.status == "proposed" for a in final):
         state, stop = "APPROVAL_ROUTING", "Waiting for an officer to approve or decline the proposed actions."
     elif any(a.status == "requested" for a in final):
         state, stop = "AWAITING_EVIDENCE", "Waiting for the requested evidence; nothing is assumed in the meantime."
