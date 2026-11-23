@@ -1,5 +1,6 @@
 import { q, ward } from "./db";
 import { nodeStatus } from "./node";
+import { groupReports, PLACE_DAYS, type Place } from "./places";
 
 export type Status = "go" | "caution" | "avoid";
 
@@ -231,14 +232,58 @@ export async function getDustScores(runId: number, siteId?: string): Promise<Dus
   );
 }
 
-export async function countReports(ipHash: string, siteId: string): Promise<{ lastHour: number; sameSiteToday: number }> {
+// Reports from one device: in the last hour, and today for the same site (or for places with no site).
+export async function countReports(ipHash: string, siteId: string | null): Promise<{ lastHour: number; sameSiteToday: number }> {
   const r = await q<{ last_hour: number; same_site: number }>(
     `select count(*) filter (where at > now() - interval '1 hour')::int as last_hour,
-            count(*) filter (where site_id=$2 and at > now() - interval '1 day')::int as same_site
+            count(*) filter (where site_id is not distinct from $2)::int as same_site
        from citizen_reports where ip_hash=$1 and at > now() - interval '1 day'`,
     [ipHash, siteId],
   );
   return { lastHour: r[0]?.last_hour ?? 0, sameSiteToday: r[0]?.same_site ?? 0 };
+}
+
+// The pilot ward a position falls in (its real boundary, else its box), or null outside them all.
+export async function wardAt(lat: number, lon: number): Promise<string | null> {
+  const r = await q<{ id: string }>(
+    `select id from wards where case when boundary is not null
+        then st_contains(st_setsrid(st_geomfromgeojson(boundary::text), 4326), st_setsrid(st_makepoint($2, $1), 4326))
+        else $2 between bbox[1] and bbox[3] and $1 between bbox[2] and bbox[4] end
+      order by id limit 1`, [lat, lon]);
+  return r[0]?.id ?? null;
+}
+
+export interface CitizenReport {
+  id: number; kind: string; note: string | null; status: "new" | "verified" | "rejected"; at: string; reviewed_at: string | null;
+  site_id: string | null; site_name: string | null; lat: number | null; lon: number | null; accuracy_m: number | null;
+  photo: { width: number; height: number } | null;
+}
+
+// Residents' reports in the ward: the new ones waiting on an officer, or the latest decided ones.
+export async function getReports(status: "new" | "reviewed", limit = 50): Promise<CitizenReport[]> {
+  const r = await q<CitizenReport>(
+    `select c.id::int, c.kind, c.note, c.status, c.at, c.reviewed_at, c.site_id, s.name as site_name, c.lat, c.lon, c.accuracy_m,
+            case when p.report_id is null then null else json_build_object('width', p.width, 'height', p.height) end as photo
+       from citizen_reports c left join sites s on s.id = c.site_id left join report_photos p on p.report_id = c.id
+      where c.ward_id=$1 and (case when $2 = 'new' then c.status = 'new' else c.status <> 'new' end)
+      order by coalesce(c.reviewed_at, c.at) desc, c.id desc limit $3`,
+    [await ward(), status, limit]);
+  return r.map((x) => ({ ...x, at: iso(x.at), reviewed_at: x.reviewed_at ? iso(x.reviewed_at) : null }));
+}
+
+// Places residents reported where no site is registered: not-rejected reports from the last 7 days, grouped.
+export async function getReportedPlaces(): Promise<Place[]> {
+  const r = await q<{ id: number; lat: number; lon: number; at: string; kind: string; photo: boolean }>(
+    `select c.id::int, c.lat, c.lon, c.at, c.kind, exists (select 1 from report_photos p where p.report_id = c.id) as photo
+       from citizen_reports c
+      where c.ward_id=$1 and c.site_id is null and c.status <> 'rejected' and c.at > now() - make_interval(days => $2)`,
+    [await ward(), PLACE_DAYS]);
+  return groupReports(r.map((x) => ({ ...x, at: iso(x.at) })));
+}
+
+export async function getPhoto(reportId: string): Promise<Buffer | null> {
+  const r = await q<{ jpeg: Buffer }>("select jpeg from report_photos where report_id=$1", [reportId]);
+  return r[0]?.jpeg ?? null;
 }
 
 export async function getLastAcceptance(siteId: string): Promise<{ accepted_at: string; run_id: number | null } | null> {
@@ -269,8 +314,7 @@ export async function getKpis(run: Run): Promise<import("./kpi").KpiRaw> {
        (select count(*)::int from sensor_audits where run_id=$1 and band='untrusted') as untrusted,
        (select count(*)::int from case_actions a join cases c on c.id = a.case_id
           where c.closed_at is null and a.phase='final' and a.status='proposed') as decisions,
-       (select count(*)::int from citizen_reports cr join sites s on s.id = cr.site_id
-          where s.ward_id=$3 and cr.status='new') as reports`,
+       (select count(*)::int from citizen_reports cr where cr.ward_id=$3 and cr.status='new') as reports`,
     [run.id, run.issued_at, await ward()],
   );
   const x = r[0];
