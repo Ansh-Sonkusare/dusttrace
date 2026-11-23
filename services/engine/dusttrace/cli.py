@@ -4,7 +4,7 @@
   seed      load the ward, seed stations, demo sites and receptors
   osm       replace demo receptors with real OSM schools and hospitals (needs network)
   osm-sites add construction sites mapped in OSM inside the ward (needs network)
-  node-add  provision a DustTrace Node (--id --name --host-kind --lat --lon) and print its key once
+  node-add  provision a DustTrace Node (--id --name --host-kind --lat --lon [--receptor | --site]) and print its key once
   osm-housing  estimated housing exposure: Census 2011 people over OSM residential land (needs network)
   ingest    load weather + readings (--mode auto|live|synthetic, --days N)
   run       train, forecast 48 h, plumes, Safe-Work Windows
@@ -12,6 +12,7 @@
   discover  Sentinel-2 change detection: possible unregistered sites (needs network)
   replay-outage  verify the CAMS fill: hide 4 days before each forecast and score it (--days N)
   verify    data check: how much of the latest run is real; stores data_checks
+  replay-rules  the evidence rules (D1, D6-D10) as of a past hour (--as-of), data up to it only; writes nothing
   all       init-db, seed, ingest, run
 """
 
@@ -23,6 +24,8 @@ import json
 import logging
 import re
 import sys
+
+import pandas as pd
 
 from . import db, pipeline
 from .config import WARDS, load_seed, load_settings
@@ -45,12 +48,15 @@ def main(argv: list[str] | None = None) -> int:
     na.add_argument("--lat", type=float, required=True)
     na.add_argument("--lon", type=float, required=True)
     na.add_argument("--receptor", help="receptor id of the school or society hosting it")
+    na.add_argument("--site", help="site id, for a node at that site's gate (host kind site_gate)")
     ing = sub.add_parser("ingest")
     ing.add_argument("--mode", choices=["auto", "live", "synthetic"], default="auto")
     ing.add_argument("--days", type=int, default=420)
     sub.add_parser("run")
     sub.add_parser("discover")
     sub.add_parser("verify")
+    rr = sub.add_parser("replay-rules")
+    rr.add_argument("--as-of", required=True, help="UTC hour, e.g. 2026-10-07T14:00Z; nothing after it is visible")
     ro = sub.add_parser("replay-outage")
     ro.add_argument("--days", type=int, default=30)
     bt = sub.add_parser("backtest")
@@ -75,8 +81,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "node-add":
             if not re.fullmatch(r"node-[a-z0-9-]{1,48}", args.id):
                 p.error("--id must look like node-<lowercase-slug>")
+            if args.site and args.host_kind != "site_gate":
+                p.error("--site is for a node at a site's gate: use --host-kind site_gate")
             key = db.add_node(conn, {"id": args.id, "name": args.name, "host_kind": args.host_kind, "lat": args.lat,
-                                     "lon": args.lon, "receptor_id": args.receptor}, settings.ward_id)
+                                     "lon": args.lon, "receptor_id": args.receptor, "site_id": args.site}, settings.ward_id)
             conn.commit()
             print(f"node {args.id} in {settings.ward_id}. Its key (shown once; flash it into the node):\n{key}")
         if args.cmd == "osm-housing":
@@ -98,6 +106,10 @@ def main(argv: list[str] | None = None) -> int:
                   f"weather {chk['weather_live']:.0%} live")
             for p in chk["problems"] or ["Everything in this run is real, live data."]:
                 print(" -", p)
+        if args.cmd == "replay-rules":
+            as_of = pd.Timestamp(args.as_of)
+            as_of = (as_of.tz_localize("UTC") if as_of.tzinfo is None else as_of.tz_convert("UTC")).floor("h")
+            print(json.dumps(pipeline.replay_rules(conn, settings, as_of), indent=2, default=str, ensure_ascii=False))
         if args.cmd == "discover":
             print("discover:", json.dumps(pipeline.discover_sites(conn, settings), indent=2, default=str))
         if args.cmd == "backtest":
