@@ -42,9 +42,17 @@ describe("satellite candidate verdicts", () => {
 });
 
 describe("places reported by residents", () => {
+  const place = { ids: [12, 15], lat: 19.11230004, lon: 72.87010001 };
+
   it("turns a confirmed place into a real site at its middle", () => {
-    expect(placeSite({ ids: [12, 15], lat: 19.11230004, lon: 72.87010001 })).toEqual({ id: "rep-12",
-      name: "Construction site (reported by residents, 19.1123, 72.8701)", activity: "excavation", lat: 19.1123, lon: 72.8701 });
+    expect(placeSite(place, "Holy Family Hospital")).toEqual({ id: "rep-12",
+      name: "Construction site reported by residents near Holy Family Hospital", activity: "excavation", lat: 19.1123, lon: 72.8701 });
+  });
+
+  it("never puts where residents stood into the public name", () => {
+    const s = placeSite(place, null);
+    expect(s.name).toBe("Construction site reported by residents (place 12)");
+    expect(s.name).not.toMatch(/19\.|72\./);
   });
 });
 

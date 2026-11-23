@@ -106,7 +106,11 @@ export async function decidePlace(form: FormData): Promise<void> {
   const place = r && (await getReportedPlaces(r.ward_id)).find((p) => p.ids.includes(id));
   if (!place) return;
   if (verdict === "confirmed") {
-    const s = placeSite(place);
+    const [near] = await q<{ name: string }>(
+      `select name from receptors where source='osm' and kind in ('school', 'hospital')
+          and st_dwithin(geom, st_setsrid(st_makepoint($2, $1), 4326)::geography, 500)
+        order by geom <-> st_setsrid(st_makepoint($2, $1), 4326)::geography limit 1`, [place.lat, place.lon]);
+    const s = placeSite(place, near?.name ?? null);
     await q(
       `insert into sites (id, name, activity, lat, lon, ward_id, sensor_status, demo, source)
        values ($1, $2, $3, $4, $5, $6, 'not_connected', false, 'citizen') on conflict (id) do nothing`,

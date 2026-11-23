@@ -44,15 +44,16 @@ export function candidateSite(c: { id: number; lat: number; lon: number; area_m2
 }
 
 // A place residents reported, once an officer confirms it, becomes a real site at the middle of its
-// reports. Its size isn't known, so it keeps the default planning area; an officer can correct both.
-export function placeSite(place: { ids: number[]; lat: number; lon: number }) {
-  const lat = Math.round(place.lat * 1e6) / 1e6, lon = Math.round(place.lon * 1e6) / 1e6;
+// reports. Its public name says what it is near (a mapped school or hospital), never where residents stood.
+// Its size isn't known, so it keeps the default planning area; an officer can correct both.
+export function placeSite(place: { ids: number[]; lat: number; lon: number }, near: string | null) {
+  const first = Math.min(...place.ids);
   return {
-    id: `rep-${Math.min(...place.ids)}`,
-    name: `Construction site (reported by residents, ${lat.toFixed(4)}, ${lon.toFixed(4)})`,
+    id: `rep-${first}`,
+    name: near ? `Construction site reported by residents near ${near}` : `Construction site reported by residents (place ${first})`,
     activity: "excavation",
-    lat,
-    lon,
+    lat: Math.round(place.lat * 1e6) / 1e6,
+    lon: Math.round(place.lon * 1e6) / 1e6,
   };
 }
 
