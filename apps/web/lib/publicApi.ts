@@ -12,7 +12,8 @@ interface RunLike {
   metrics: { newest_real_reading?: string | null; filled?: { stations: number; hours: number } };
 }
 
-export function publicForecast(run: RunLike, points: { ts: string; pm10: number; pm10_lo: number; pm10_hi: number; p_exceed: number }[], ward: string) {
+export function publicForecast(run: RunLike, points: { ts: string; pm10: number; pm10_lo: number; pm10_hi: number; p_exceed: number }[], ward: string,
+                               days: { station_id: string; day: number; starts_at: string; ends_at: string; p_exceed: number }[] = []) {
   return {
     ward,
     run_id: run.id,
@@ -24,6 +25,9 @@ export function publicForecast(run: RunLike, points: { ts: string; pm10: number;
     units: "µg/m³",
     sources: ["CPCB stations via OpenAQ", "Copernicus CAMS via Open-Meteo (fills feed gaps, flagged)", "Open-Meteo weather"],
     hours: points.map((p) => ({ ts: p.ts, pm10: r1(p.pm10), pm10_lo: r1(p.pm10_lo), pm10_hi: r1(p.pm10_hi), p_exceed_100: Math.round(p.p_exceed * 100) / 100 })),
+    // P(24 h mean PM10 > 100) for the ward, for the 24 h from `from` to `to` (first and last forecast hour).
+    daily_24h_mean: days.filter((d) => d.station_id === "ward").sort((a, b) => a.day - b.day)
+      .map((d) => ({ day: d.day, from: d.starts_at, to: d.ends_at, p_exceed_100: Math.round(d.p_exceed * 100) / 100 })),
   };
 }
 

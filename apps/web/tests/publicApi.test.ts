@@ -17,6 +17,15 @@ describe("public API", () => {
     expect(f.units).toBe("µg/m³");
   });
 
+  it("forecast adds the ward's daily 24 h mean exceedance, keeping the hourly shape", () => {
+    const hour = { ts: "2026-10-12T09:00:00.000Z", pm10: 80, pm10_lo: 60, pm10_hi: 110, p_exceed: 0.21 };
+    const day = { station_id: "ward", day: 1, starts_at: "2026-10-12T09:00:00.000Z", ends_at: "2026-10-13T08:00:00.000Z", p_exceed: 0.4567 };
+    const f = publicForecast(run, [hour], "K-East", [day, { ...day, station_id: "openaq-1", p_exceed: 0.9 }]);
+    expect(f.hours[0]).toEqual({ ts: hour.ts, pm10: 80, pm10_lo: 60, pm10_hi: 110, p_exceed_100: 0.21 });
+    expect(f.daily_24h_mean).toEqual([{ day: 1, from: day.starts_at, to: day.ends_at, p_exceed_100: 0.46 }]);
+    expect(publicForecast(run, [hour], "K-East").daily_24h_mean).toEqual([]);
+  });
+
   it("windows are per site and hour, without receptor names or people counts", () => {
     const w = publicWindows([{ site_id: "osm-way-1", ts: "2026-10-12T09:00:00.000Z", status: "avoid", exposed_people: 900, sensitive_hit: true,
       reason: "Plume reaches Marol Maternity Home" }], [{ id: "osm-way-1", name: "Metro Casting Yard", demo: false, source: "osm", lat: 19.1, lon: 72.8 }]);
