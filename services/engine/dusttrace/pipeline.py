@@ -251,6 +251,7 @@ def run(conn, settings: Settings) -> dict:
 
     ward_fc = fc[fc["station_id"] == "ward"].set_index("ts")["p_exceed"]
     future = wx[(wx["ts"] > t0) & (wx["ts"] <= t0 + pd.Timedelta(hours=settings.horizon_hours))]
+    future = future.merge(windows.rain_effect(wx), on="ts", how="left")
     sites = db.read_sites(conn, ward_id)
     recs = db.read_receptors(conn, ward_id)
     for c in ["lat", "lon"]:

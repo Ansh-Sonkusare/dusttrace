@@ -245,6 +245,47 @@ def test_person_exposure_counts_faint_dust_that_no_exposures_row_holds():
     assert h.person_exposure == pytest.approx(h.person_exposure_15 + 20000 * far)  # upwind homes add nothing
 
 
+# ---------- rain (AP-42 13.2.1, hour by hour) ----------
+
+def test_rain_follows_ap42_hour_by_hour():
+    ts = pd.date_range("2026-07-01T00:00Z", periods=22, freq="h")
+    precip = [0.0, 0.3, 5.0, 0.0, 0.2, 0.0, 0.0] + [4.0] * 15
+    fx = windows.rain_effect(pd.DataFrame({"ts": ts, "precip": precip})).set_index("ts")
+    # Dry; two wet hours (0.254 mm or more) make no dust; then two hours of 20% credit (0.2 mm is dry).
+    assert list(fx["dust_factor"][:7]) == [1.0, 0.0, 0.0, 0.8, 0.8, 1.0, 1.0]
+    assert pd.isna(fx["rain_since"].iloc[0]) and list(fx["rain_since"][1:5]) == [0, 0, 1, 2]
+    after_long_rain = windows.rain_effect(pd.DataFrame({
+        "ts": pd.date_range("2026-07-01T00:00Z", periods=30, freq="h"), "precip": [4.0] * 15 + [0.0] * 15}))
+    assert list(after_long_rain["dust_factor"][15:]) == [0.8] * 12 + [1.0] * 3   # credit stops at 12 h
+    drizzle = windows.rain_effect(pd.DataFrame({"ts": ts[:3], "precip": [0.2, 0.2, None]}))
+    assert list(drizzle["dust_factor"]) == [1.0, 1.0, 1.0]                        # each hour under 0.254 mm: dry
+
+
+_SITE = pd.DataFrame([{"id": "A", "name": "A", "activity": "demolition", "lat": 19.11, "lon": 72.86, "area_m2": 6000}])
+_SCHOOL = pd.DataFrame([{"id": "s", "name": "West School", "kind": "school", "lat": 19.11, "lon": 72.855, "population": 1000}])
+_CALM = {"wind_speed": 1.2, "wind_dir": 90, "blh": 200}
+
+
+def test_forecast_rain_lowers_the_increment_and_the_reason_names_it():
+    wx = pd.DataFrame([
+        {"ts": pd.Timestamp("2026-11-12T00:30Z"), **_CALM, "precip": 0.0, "dust_factor": 1.0, "rain_since": None},
+        {"ts": pd.Timestamp("2026-11-13T00:30Z"), **_CALM, "precip": 0.0, "dust_factor": 0.8, "rain_since": 2},
+    ])
+    dry, drying = windows.evaluate(_SITE, _SCHOOL, wx, pd.Series(dtype=float), _settings())
+    assert drying.exposures[0][1] == pytest.approx(dry.exposures[0][1] * 0.8)
+    assert drying.person_exposure == pytest.approx(dry.person_exposure * 0.8)
+    assert "rain" not in dry.reason
+    assert "rain 2 h ago" in drying.reason and "20%" in drying.reason
+
+
+def test_no_dust_while_it_rains_and_the_reason_says_so():
+    wx = pd.DataFrame([{"ts": pd.Timestamp("2026-11-13T00:30Z"), **_CALM, "precip": 3.2, "dust_factor": 0.0,
+                        "rain_since": 0}])
+    (h,) = windows.evaluate(_SITE, _SCHOOL, wx, pd.Series(dtype=float), _settings())
+    assert h.status == "go" and h.exposures == [] and h.person_exposure == 0 and h.max_conc == 0
+    assert "rain (3.2 mm) keeps the dust down" in h.reason
+
+
 # ---------- forecast ----------
 
 def test_forecast_beats_persistence_on_synthetic_year():
