@@ -46,14 +46,19 @@ export function candidateSite(c: { id: number; lat: number; lon: number; area_m2
 // A place residents reported, once an officer confirms it, becomes a real site at the middle of its
 // reports. Its public name says what it is near (a mapped school or hospital), never where residents stood.
 // Its size isn't known, so it keeps the default planning area; an officer can correct both.
+// A site is public, so a place residents reported sits on a grid of about 200 m (0.002°) rather than at their
+// average position, which for one report is where that resident stood.
+const GRID_DEG = 0.002;
+const snap = (v: number) => Math.round(Math.round(v / GRID_DEG) * GRID_DEG * 1e6) / 1e6;
+
 export function placeSite(place: { ids: number[]; lat: number; lon: number }, near: string | null) {
   const first = Math.min(...place.ids);
   return {
     id: `rep-${first}`,
     name: near ? `Construction site reported by residents near ${near}` : `Construction site reported by residents (place ${first})`,
     activity: "excavation",
-    lat: Math.round(place.lat * 1e6) / 1e6,
-    lon: Math.round(place.lon * 1e6) / 1e6,
+    lat: snap(place.lat),
+    lon: snap(place.lon),
   };
 }
 
