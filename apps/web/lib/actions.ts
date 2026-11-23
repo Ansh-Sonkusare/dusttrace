@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { q } from "./db";
 import { parseOutcome } from "./officer";
 import { planSecret, verifySite } from "./plan";
+import { getReportedPlaces } from "./queries";
 import { parseReview } from "./report";
-import { candidateSite, parseCandidateVerdict, parsePlaceVerdict, placeSite } from "./sites";
+import { candidateSite, parseCandidateVerdict, placeSite } from "./sites";
 
 // An officer approves or declines an action the policy engine proposed (route L1 or L2).
 // Only proposed actions can be decided; everything else the engine set stays as it is.
@@ -93,25 +94,28 @@ export async function reviewReport(form: FormData): Promise<void> {
   revalidatePath("/inspect");
 }
 
-// An officer confirms a place residents reported (F2) into a real site, as with a satellite candidate; its
-// reports move to the new site. Rejecting the place rejects its reports.
+// An officer confirms a place residents reported (F2) into a real site, as with a satellite candidate, or
+// rejects it. The page posts one of the place's reports; the place is grouped again from the reports as they
+// stand, so one that arrived after the page loaded goes with it. Confirming moves its reports to the new site;
+// rejecting rejects only the reports nobody has checked yet.
 export async function decidePlace(form: FormData): Promise<void> {
-  const parsed = parsePlaceVerdict(form);
+  const parsed = parseCandidateVerdict(form);
   if (!parsed.ok) return;
-  const { ids, verdict } = parsed.value;
-  const rows = await q<{ id: number; ward_id: string; lat: number; lon: number }>(
-    "select id::int, ward_id, lat, lon from citizen_reports where id = any($1) and site_id is null and status <> 'rejected'", [ids]);
-  if (rows.length === 0) return;
+  const { id, verdict } = parsed.value;
+  const [r] = await q<{ ward_id: string }>("select ward_id from citizen_reports where id=$1 and site_id is null", [id]);
+  const place = r && (await getReportedPlaces(r.ward_id)).find((p) => p.ids.includes(id));
+  if (!place) return;
   if (verdict === "confirmed") {
-    const s = placeSite(rows);
+    const s = placeSite(place);
     await q(
       `insert into sites (id, name, activity, lat, lon, ward_id, sensor_status, demo, source)
        values ($1, $2, $3, $4, $5, $6, 'not_connected', false, 'citizen') on conflict (id) do nothing`,
-      [s.id, s.name, s.activity, s.lat, s.lon, rows[0].ward_id],
+      [s.id, s.name, s.activity, s.lat, s.lon, r.ward_id],
     );
-    await q("update citizen_reports set site_id=$2 where id = any($1) and site_id is null", [rows.map((r) => r.id), s.id]);
+    await q("update citizen_reports set site_id=$2 where id = any($1) and site_id is null", [place.ids, s.id]);
   } else {
-    await q("update citizen_reports set status='rejected', reviewed_at=now() where id = any($1) and site_id is null", [rows.map((r) => r.id)]);
+    await q("update citizen_reports set status='rejected', reviewed_at=now() where id = any($1) and site_id is null and status='new'",
+      [place.ids]);
   }
   revalidatePath("/inspect");
   revalidatePath("/sites");

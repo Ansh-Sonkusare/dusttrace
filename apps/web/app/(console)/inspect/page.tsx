@@ -93,7 +93,7 @@ export default async function InspectPage() {
                         <td><a href={`https://www.google.com/maps/@${p.lat},${p.lon},300m/data=!3m1!1e3`} target="_blank" rel="noreferrer">Satellite view</a></td>
                         <td>
                           <form action={decidePlace} className="decide">
-                            <input type="hidden" name="ids" value={p.ids.join(",")} />
+                            <input type="hidden" name="id" value={p.ids[0]} />
                             <button className="btn" name="verdict" value="confirmed" title="Add it to the site list; the next run plans windows for it">Confirm site</button>
                             <button className="btn" name="verdict" value="rejected" title="Not construction: reject its reports">Reject</button>
                           </form>

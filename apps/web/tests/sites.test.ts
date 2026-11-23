@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candidateSite, mapCode, parseCandidateVerdict, parsePlaceVerdict, placeSite, siteLabel, sourceLabel, monitorLabel } from "../lib/sites";
+import { candidateSite, mapCode, parseCandidateVerdict, placeSite, siteLabel, sourceLabel, monitorLabel } from "../lib/sites";
 
 const form = (o: Record<string, string>) => {
   const f = new FormData();
@@ -42,21 +42,9 @@ describe("satellite candidate verdicts", () => {
 });
 
 describe("places reported by residents", () => {
-  it("accepts confirm and reject for the place's report ids", () => {
-    expect(parsePlaceVerdict(form({ ids: "15,12", verdict: "confirmed" }))).toEqual({ ok: true, value: { ids: [12, 15], verdict: "confirmed" } });
-    expect(parsePlaceVerdict(form({ ids: "7", verdict: "rejected" })).ok).toBe(true);
-  });
-
-  it("refuses anything else", () => {
-    expect(parsePlaceVerdict(form({ ids: "", verdict: "confirmed" })).ok).toBe(false);
-    expect(parsePlaceVerdict(form({ ids: "1,x", verdict: "confirmed" })).ok).toBe(false);
-    expect(parsePlaceVerdict(form({ ids: "1", verdict: "maybe" })).ok).toBe(false);
-  });
-
-  it("turns a confirmed place into a real site at the middle of its reports", () => {
-    const s = placeSite([{ id: 15, lat: 19.1124, lon: 72.8702 }, { id: 12, lat: 19.1122, lon: 72.8700 }]);
-    expect(s).toEqual({ id: "rep-12", name: "Construction site (reported by residents, 19.1123, 72.8701)", activity: "excavation",
-      lat: 19.1123, lon: 72.8701 });
+  it("turns a confirmed place into a real site at its middle", () => {
+    expect(placeSite({ ids: [12, 15], lat: 19.11230004, lon: 72.87010001 })).toEqual({ id: "rep-12",
+      name: "Construction site (reported by residents, 19.1123, 72.8701)", activity: "excavation", lat: 19.1123, lon: 72.8701 });
   });
 });
 

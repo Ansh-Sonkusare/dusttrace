@@ -20,6 +20,7 @@ export const monitorLabel = (status: string) => MONITOR[status] ?? "Monitor stat
 
 export type Verdict = "confirmed" | "rejected";
 
+// A satellite candidate, or a place residents reported (by one of its report ids), confirmed or rejected.
 export function parseCandidateVerdict(form: FormData): Parsed<{ id: number; verdict: Verdict }> {
   const raw = String(form.get("id") ?? "");
   const id = Number(raw);
@@ -42,22 +43,12 @@ export function candidateSite(c: { id: number; lat: number; lon: number; area_m2
   };
 }
 
-export function parsePlaceVerdict(form: FormData): Parsed<{ ids: number[]; verdict: Verdict }> {
-  const raw = String(form.get("ids") ?? "").split(",");
-  const ids = raw.map(Number).sort((a, b) => a - b);
-  const verdict = String(form.get("verdict") ?? "");
-  if (!raw.every((x) => /^\d+$/.test(x)) || !ids.every(Number.isSafeInteger)) return { ok: false, error: "Unknown place." };
-  if (verdict !== "confirmed" && verdict !== "rejected") return { ok: false, error: "Confirm or reject." };
-  return { ok: true, value: { ids, verdict } };
-}
-
 // A place residents reported, once an officer confirms it, becomes a real site at the middle of its
 // reports. Its size isn't known, so it keeps the default planning area; an officer can correct both.
-export function placeSite(reports: { id: number; lat: number; lon: number }[]) {
-  const mean = (k: "lat" | "lon") => Math.round((reports.reduce((s, r) => s + r[k], 0) / reports.length) * 1e6) / 1e6;
-  const lat = mean("lat"), lon = mean("lon");
+export function placeSite(place: { ids: number[]; lat: number; lon: number }) {
+  const lat = Math.round(place.lat * 1e6) / 1e6, lon = Math.round(place.lon * 1e6) / 1e6;
   return {
-    id: `rep-${Math.min(...reports.map((r) => r.id))}`,
+    id: `rep-${Math.min(...place.ids)}`,
     name: `Construction site (reported by residents, ${lat.toFixed(4)}, ${lon.toFixed(4)})`,
     activity: "excavation",
     lat,

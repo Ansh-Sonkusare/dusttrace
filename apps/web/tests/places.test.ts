@@ -46,4 +46,11 @@ describe("reported places", () => {
     expect(a.map((p) => p.ids)).toEqual([[1, 3, 5], [2, 4]]);
     expect(a[0].first_at < a[0].last_at).toBe(true);
   });
+
+  it("puts a report that arrived after the page loaded into the place an officer confirms", () => {
+    const onPage = groupReports([at(1, 0, 0), at(2, 0, 40)]);
+    const now = groupReports([at(1, 0, 0), at(2, 0, 40), at(3, 30, 20)]);
+    expect(onPage[0].ids).toEqual([1, 2]);
+    expect(now.find((p) => p.ids.includes(onPage[0].ids[0]))?.ids).toEqual([1, 2, 3]);
+  });
 });

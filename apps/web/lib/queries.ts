@@ -272,12 +272,12 @@ export async function getReports(status: "new" | "reviewed", limit = 50): Promis
 }
 
 // Places residents reported where no site is registered: not-rejected reports from the last 7 days, grouped.
-export async function getReportedPlaces(): Promise<Place[]> {
+export async function getReportedPlaces(wardId?: string): Promise<Place[]> {
   const r = await q<{ id: number; lat: number; lon: number; at: string; kind: string; photo: boolean }>(
     `select c.id::int, c.lat, c.lon, c.at, c.kind, exists (select 1 from report_photos p where p.report_id = c.id) as photo
        from citizen_reports c
       where c.ward_id=$1 and c.site_id is null and c.status <> 'rejected' and c.at > now() - make_interval(days => $2)`,
-    [await ward(), PLACE_DAYS]);
+    [wardId ?? await ward(), PLACE_DAYS]);
   return groupReports(r.map((x) => ({ ...x, at: iso(x.at) })));
 }
 
