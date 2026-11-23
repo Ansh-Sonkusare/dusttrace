@@ -24,7 +24,7 @@ export default async function PlanPage({ params, searchParams }: {
   const run = site ? await getLatestRun(site.ward_id) : null;
   if (!site || !run) notFound();
   const rows = (await getWindows(run.id, siteId)).slice(0, 24);
-  const holds = spans(rows).filter((s) => s.status === "avoid" && istHour(s.from) >= 6 && istHour(s.from) < 22);
+  const holds = spans(rows).filter((s) => s.status === "avoid" && s.rows.some((r) => istHour(r.ts) >= 6 && istHour(r.ts) < 22));
   const mist = mistSchedule(rows.filter((r) => { const h = istHour(r.ts); return h >= 6 && h < 22; }));
   const best = spans(rows.filter((r) => r.status === "go" && istHour(r.ts) >= 8 && istHour(r.ts) < 20))
     .sort((a, b) => b.rows.length - a.rows.length).slice(0, 2).sort((a, b) => a.from.localeCompare(b.from));
