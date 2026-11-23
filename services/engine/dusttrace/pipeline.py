@@ -13,7 +13,7 @@ import pandas as pd
 from psycopg.types.json import Jsonb
 
 from . import agent, alerts, attribution, audit, backtest as bt, db, dust_score, fill, forecast, windows
-from . import effect, geo, housing, signature, verify as verify_mod
+from . import effect, exposure, geo, housing, signature, verify as verify_mod
 from .config import Settings, load_seed
 from .sources import cams, ohsome, openaq, openmeteo, overpass, synthetic
 
@@ -257,7 +257,9 @@ def run(conn, settings: Settings) -> dict:
     for c in ["lat", "lon"]:
         recs[c] = recs[c].astype(float)
     hours = windows.evaluate(sites, recs, future, ward_fc, settings)
-    db.write_site_hours(conn, run_id, hours)
+    plans = exposure.plan(hours)
+    db.write_site_hours(conn, run_id, hours, plans)
+    db.write_exposure_avoided(conn, run_id, plans)
     ranked = rank_sites(conn, ward_id, sites, list(active), future, ward_fc, audits)
     db.write_ranking(conn, run_id, ranked)
     known = sites.set_index("id")["sensor_known"].to_dict()
