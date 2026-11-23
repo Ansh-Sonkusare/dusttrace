@@ -311,20 +311,48 @@ def score_sites(conn, ward_id: str, ranked, audits, sensor_known: dict | None = 
 
 
 def audit_sensors(conn, ward_id: str, rd: pd.DataFrame, wx: pd.DataFrame, t0: pd.Timestamp):
-    """Simulate each site's sensor from the ambient series, store the readings, and score them (F1).
+    """Simulate each site's sensor on its nearest station, store the readings, and score them (F1).
 
-    Also scores a 50-sensor benchmark with known faults, so each run reports the audit's precision
-    and recall under the current weather.
+    The ambient is the stations' measured hours, never CAMS-filled ones, so the audit covers the days up
+    to the newest measured hour: while the feed lags, reruns score the same week and give the same
+    numbers. Each run also scores a 50-sensor benchmark with known faults: precision and recall of the
+    rule checks, of the Isolation Forest on residuals against neighbours, and of both, per fault too.
     """
-    specs = [audit.SensorSpec(r.sensor_id, r.site_id, float(r.lat), float(r.lon), float(r.area_m2),
-                              r.activity, r.fault) for r in db.read_sensor_specs(conn, ward_id).itertuples()]
-    ambient = rd.groupby("ts")["pm10"].mean()
-    sim = audit.simulate(specs, ambient, wx, t0)
+    measured = rd[~rd["filled"].astype(bool) & (rd["ts"] <= t0)].dropna(subset=["pm10"])
+    if measured.empty:
+        log.warning("No measured station hours up to %s: site sensors not audited", t0)
+        return [], {"n": 0, "not_enough_data": "no measured station hours"}, {}
+    as_of = measured["ts"].max().floor("h")
+    start = as_of - pd.Timedelta(days=audit.SIM_DAYS)
+    measured = measured[measured["ts"] > start]
+    pm10 = measured.pivot_table(index="ts", columns="station_id", values="pm10").reindex(
+        pd.date_range(start + pd.Timedelta(hours=1), as_of, freq="h"))
+    if not (pm10.notna().mean() >= 0.5).any():
+        log.warning("No station measured PM10 in half the hours to %s: site sensors not audited", as_of)
+        return [], {"n": 0, "not_enough_data": "no station measured PM10 in half the hours"}, {}
+    st = db.read_frame(conn, "select id, name, lat, lon from stations where id = any(%s)", (list(pm10.columns),))
+    ambient = audit.Ambient(tuple(audit.Station(r.id, r.name, float(r.lat), float(r.lon)) for r in st.itertuples()), pm10)
+    nodes = db.node_pm10(conn, ward_id, start, as_of)
+    w = conn.execute("select center_lat, center_lon from wards where id=%s", (ward_id,)).fetchone()
+    centre = (float(w[0]), float(w[1]))
+
+    specs = [audit.SensorSpec(r.sensor_id, r.site_id, float(r.lat), float(r.lon), float(r.area_m2), r.activity, r.fault,
+                              calibrated_on=audit.simulated_calibration(r.sensor_id, as_of) if r.simulated
+                              else (pd.Timestamp(r.calibrated_on, tz="UTC") if pd.notna(r.calibrated_on) else None),
+                              imagery=r.imagery if pd.notna(r.imagery) else None)
+             for r in db.read_sensor_specs(conn, ward_id, as_of, audit.IMAGERY_DAYS).itertuples()]
+    db.write_calibration(conn, {s.sensor_id: s.calibrated_on for s in specs if s.calibrated_on is not None})
+    sim = audit.simulate(specs, ambient, wx, as_of)
     db.write_site_readings(conn, sim)
-    results = [audit.score(s, sim, ambient, wx, t0) for s in specs]
-    by_site = {s.sensor_id: s.site_id for s in specs}
-    hot = {by_site[k]: v for k, v in audit.hot_hours(sim, ambient, t0).items()}
-    return results, audit.benchmark(ambient, wx, t0), hot
+    results = [audit.score(s, sim, ambient, wx, as_of) for s in specs]
+    bench = audit.benchmark(ambient, wx, as_of, centre, nodes=nodes)
+    bench.update(as_of=as_of.isoformat(), nodes=[] if nodes is None else sorted(nodes.columns),
+                 ambient=verify_mod.input_shares(rd[rd["station_id"].isin(list(bench["stations"]))], as_of))
+    hot = {}
+    if t0 - as_of <= pd.Timedelta(hours=FRESH_HOURS):  # D4 is about now; an old week says nothing about it
+        by_site = {s.sensor_id: s.site_id for s in specs}
+        hot = {by_site[k]: v for k, v in audit.hot_hours(sim, specs, ambient, as_of).items()}
+    return results, bench, hot
 
 
 def respond(conn, ward_id: str, run_id: int, now: pd.Timestamp, hours, recs: pd.DataFrame,

@@ -269,11 +269,38 @@ def read_sites(conn, ward_id: str) -> pd.DataFrame:
     return df
 
 
-def read_sensor_specs(conn, ward_id: str) -> pd.DataFrame:
-    return read_frame(conn, """select n.id as sensor_id, n.site_id, s.lat, s.lon, s.area_m2, s.activity,
-                                      coalesce(n.injected_fault, 'none') as fault
+def read_sensor_specs(conn, ward_id: str, as_of, imagery_days: int) -> pd.DataFrame:
+    """Each site sensor, its calibration date, and the date of the newest Sentinel-2 scene matched to its
+    site (not rejected) taken in the `imagery_days` up to `as_of`, the end of the audited week, if any.
+    A scene id without a date counts for nothing: when it was found says nothing about the ground."""
+    return read_frame(conn, r"""select n.id as sensor_id, n.site_id, s.lat, s.lon, s.area_m2, s.activity,
+                                      coalesce(n.injected_fault, 'none') as fault, n.simulated, n.calibrated_on,
+                                      (select to_char(max(c.d), 'YYYY-MM-DD')
+                                         from (select to_date(substring(k.scene_after from '_(\d{8})_'), 'YYYYMMDD') as d
+                                                 from site_candidates k
+                                                where k.site_id = s.id and k.status <> 'rejected') c
+                                        where c.d between %s::date - %s and %s::date) as imagery
                                  from site_sensors n join sites s on s.id = n.site_id
-                                where s.ward_id=%s and (%s or not s.demo) order by n.id""", (ward_id, demo_sites()))
+                                where s.ward_id=%s and (%s or not s.demo) order by n.id""",
+                      (as_of.to_pydatetime(), imagery_days, as_of.to_pydatetime(), ward_id, demo_sites()))
+
+
+def write_calibration(conn, dates: dict[str, pd.Timestamp]) -> None:
+    """Simulated calibration dates; a real sensor's date on record is never overwritten."""
+    with conn.cursor() as cur:
+        cur.executemany("update site_sensors set calibrated_on=%s where id=%s and simulated",
+                        [(pd.Timestamp(d).date(), k) for k, d in dates.items()])
+
+
+def node_pm10(conn, ward_id: str, start, end) -> pd.DataFrame | None:
+    """Hourly PM10 at the ward's DustTrace Nodes, one column per node; None if it has none reporting."""
+    df = read_frame(conn, """select h.node_id, h.ts, h.pm10 from node_hourly h join nodes n on n.id = h.node_id
+                              where n.ward_id=%s and n.active and h.ts > %s and h.ts <= %s""",
+                    (ward_id, start.to_pydatetime(), end.to_pydatetime()))
+    if df.empty:
+        return None
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    return df.pivot_table(index="ts", columns="node_id", values="pm10").astype(float)
 
 
 def write_site_readings(conn, df: pd.DataFrame) -> int:
