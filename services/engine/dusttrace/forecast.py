@@ -288,6 +288,7 @@ def predict(model: Model, readings: pd.DataFrame, wx: pd.DataFrame, t0: pd.Times
     rows = build_rows(readings, wx, origins, horizon, model.station_codes, with_target=False, cams=use_cams,
                       festival="festival" in model.features,
                       upwind=model.upwind if "upwind_sites_ha" in model.features else None)
+    rows = rows[rows[WX_COLS].notna().any(axis=1)].copy()  # no weather forecast for the hour: no PM10 forecast either
     if rows.empty:
         return pd.DataFrame(columns=["station_id", "ts", "pm10", "pm10_lo", "pm10_hi", "p_exceed"])
     X = rows[model.features]
@@ -313,5 +314,6 @@ def predict_daily(model: Model, readings: pd.DataFrame, wx: pd.DataFrame, t0: pd
                       cams=cams if "cams_mean_24" in model.daily_features else None,
                       festival="festival" in model.daily_features,
                       upwind=model.upwind if "upwind_sites_ha" in model.daily_features else None)
+    rows = rows[rows[[f"{c}_24" for c in WX_COLS]].notna().any(axis=1)].copy()  # needs 18 h of weather forecast
     rows["p_exceed"] = model.daily.predict_proba(rows[model.daily_features])[:, 1]
     return rows[["station_id", "day", "starts_at", "ends_at", "p_exceed"]].reset_index(drop=True)

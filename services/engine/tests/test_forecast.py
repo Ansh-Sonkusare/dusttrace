@@ -51,6 +51,14 @@ def test_hourly_forecast_reaches_72_hours_and_daily_probabilities_cover_three_da
     assert days["p_exceed"].between(0, 1).all()
 
 
+def test_hours_past_the_weather_forecast_are_not_forecast(year, model):
+    rd, wx = year
+    short = wx[wx["ts"] <= END + pd.Timedelta(hours=60)]
+    fc = forecast.predict(model, rd, short, END, horizon=72)
+    assert fc.groupby("station_id")["ts"].max().eq(END + pd.Timedelta(hours=60)).all()
+    assert forecast.predict_daily(model, rd, short, END)["day"].max() == 2  # day 3 has 12 of its 24 weather hours
+
+
 def test_daily_target_is_the_mean_of_the_24_hours_after_the_origin(year):
     rd, wx = year
     t0 = END - pd.Timedelta(days=10)
