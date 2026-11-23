@@ -382,8 +382,9 @@ def write_alerts(conn, run_id: int, rows) -> None:
 def write_dust_scores(conn, run_id: int, scores: dict) -> None:
     with conn.cursor() as cur:
         cur.executemany(
-            """insert into dust_scores (run_id, site_id, score, band, components, notes) values (%s,%s,%s,%s,%s,%s)""",
-            [(run_id, sid, s.score, s.band, json.dumps(s.components), s.notes) for sid, s in scores.items()],
+            """insert into dust_scores (run_id, site_id, score, band, components, notes, inputs)
+               values (%s,%s,%s,%s,%s,%s,%s)""",
+            [(run_id, sid, s.score, s.band, json.dumps(s.components), s.notes, json.dumps(s.inputs)) for sid, s in scores.items()],
         )
 
 

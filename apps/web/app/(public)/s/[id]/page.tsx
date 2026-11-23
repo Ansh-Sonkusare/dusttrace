@@ -1,16 +1,17 @@
 import { notFound } from "next/navigation";
 import Logo from "@/components/Logo";
 import WindowStrip from "@/components/WindowStrip";
+import ReportForm from "@/components/ReportForm";
 import { getDustScores, getLatestRun, getSite, getWard, getWindows } from "@/lib/queries";
-import { REPORT_KINDS } from "@/lib/report";
+import { REPORT_ERROR, REPORT_KINDS } from "@/lib/report";
 import { SCORE_BAND, SCORE_PART } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
+// ?r=… after a form posted without JavaScript: thanks, or why the report was refused.
 const MESSAGE: Record<string, string> = {
   sent: "Thank you. Your report went to the ward environment officer.",
-  too_many: "You have sent several reports already. Please try again later.",
-  invalid: "Please pick what you saw.",
+  ...REPORT_ERROR,
 };
 
 // Public page for residents, opened from the QR code on the site's LED board (PRD F8).
@@ -32,7 +33,7 @@ export default async function PublicSitePage({ params, searchParams }: {
       {(site.demo || run?.data_mode !== "live") && (
         <div className="banner">Demo site for the DustTrace prototype. The score uses simulated monitor data and is not an official rating.</div>
       )}
-      {r && MESSAGE[r] && <div className={`banner ${r === "sent" ? "ok" : ""}`} role="status">{MESSAGE[r]}</div>}
+      {r && Object.hasOwn(MESSAGE, r) && <div className={`banner ${r === "sent" ? "ok" : ""}`} role="status">{MESSAGE[r]}</div>}
 
       <section className="panel">
         <div className="pb score">
@@ -78,19 +79,9 @@ export default async function PublicSitePage({ params, searchParams }: {
       <section className="panel">
         <div className="ph"><h2>Report dust from this site</h2></div>
         <div className="pb">
-          <form method="post" action="/api/report" className="outcome">
-            <input type="hidden" name="site_id" value={site.id} />
-            <input type="text" name="website" tabIndex={-1} autoComplete="off" className="hp" aria-hidden="true" />
-            <fieldset>
-              <legend className="small muted">What did you see?</legend>
-              {Object.entries(REPORT_KINDS).map(([k, label]) => (
-                <label key={k} className="choice"><input type="radio" name="kind" value={k} required /> {label}</label>
-              ))}
-            </fieldset>
-            <textarea name="note" rows={3} maxLength={500} placeholder="Anything else? (optional, no names or phone numbers please)" />
-            <button className="btn primary">Send report</button>
-          </form>
-          <p className="small muted" style={{ margin: "10px 0 0" }}>Reports go to the ward environment officer. An officer checks them before they count toward the score. We keep no name or number, only a scrambled code of your connection to stop spam.</p>
+          <ReportForm siteId={site.id} kinds={REPORT_KINDS} />
+          <p className="small muted" style={{ margin: "10px 0 0" }}>Reports go to the ward environment officer. An officer checks them before they count toward the score. We keep no name or number: only your location if you share it, and a scrambled code of your connection to stop spam. A photo is shrunk on your phone with its hidden details (such as location tags) removed, and only the ward officer sees it.</p>
+          <p className="small muted" style={{ margin: "8px 0 0" }}>Dust from a place with no DustTrace board? <a href="/report-dust">Report that place</a>.</p>
         </div>
       </section>
       <footer className="small muted">DustTrace · Team ARA IGNITE</footer>

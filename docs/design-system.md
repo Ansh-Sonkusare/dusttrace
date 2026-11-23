@@ -72,6 +72,8 @@ Writing rules: sentence case everywhere. No all-caps eyebrows, no labels stacked
 | `@media print` | Weekly report prints on white: rail, top bar and banner hidden, panels kept whole |
 | `.meter.split` | Data check: where the run's station hours came from. Measured is light grey `#C9C9CE`, filled from CAMS is amber `--dust-mark`, synthetic is dark grey `#4A4A50`; key below with percentages |
 | Public site page (`/s/[id]`) | No console rail; one 640 px column, phone first. Big light score numeral, band pill (Good go, Fair caution, Poor avoid), grey part bars, demo banner, 44 px report choices |
+| `ReportForm` (`/s/[id]`, `/report-dust`) | Kind choices, note, a file picker styled as a round button (44 px), and "Share my location" with the accuracy the phone gave. The photo is redrawn at 1280 px on its longest side as a JPEG before upload. Errors show in the dust banner. `/report-dust` uses the public page layout |
+| Resident reports (`/resident-reports`) | Console list: photo thumbnail (`.thumb`, 168 × 126 px, 10 px corners, cropped to fill), kind, time in IST, note, place, Verify and Reject buttons. The item bar stays grey: a report waiting for a check is not a status |
 | `TrustPill` | Sensor trust score and band: Trusted (go), Check (caution), Untrusted (avoid); "No sensor" plain |
 
 ## Charts

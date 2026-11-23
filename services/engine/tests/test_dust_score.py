@@ -41,3 +41,10 @@ def test_bands():
 def test_unconnected_feed_counts_half_and_says_so():
     s = score(has_sensor=False, sensor_known=False, windows_followed=1.0)
     assert s.components["trust"] == 15 and any("not connected" in n for n in s.notes)
+
+
+def test_the_score_keeps_what_it_was_computed_from():
+    s = score(trust=80, spike_hours=2, verified_reports=1, violations=1)
+    assert s.inputs == {"trust": 80, "has_sensor": True, "sensor_known": True, "spike_hours": 2,
+                        "windows_followed": None, "verified_reports": 1, "violations": 1}
+    assert s.components["reports"] == 10

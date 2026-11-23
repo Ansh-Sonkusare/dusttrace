@@ -2,7 +2,7 @@
 
 import type { Parsed } from "./officer";
 
-const SOURCES: Record<string, string> = { osm: "OpenStreetMap", satellite: "Satellite, confirmed" };
+const SOURCES: Record<string, string> = { osm: "OpenStreetMap", satellite: "Satellite, confirmed", citizen: "Residents, confirmed" };
 
 export function sourceLabel(s: { demo: boolean; source?: string | null }): string | null {
   if (s.demo) return "Demo";
@@ -20,6 +20,7 @@ export const monitorLabel = (status: string) => MONITOR[status] ?? "Monitor stat
 
 export type Verdict = "confirmed" | "rejected";
 
+// A satellite candidate, or a place residents reported (by one of its report ids), confirmed or rejected.
 export function parseCandidateVerdict(form: FormData): Parsed<{ id: number; verdict: Verdict }> {
   const raw = String(form.get("id") ?? "");
   const id = Number(raw);
@@ -39,6 +40,25 @@ export function candidateSite(c: { id: number; lat: number; lon: number; area_m2
     lat: c.lat,
     lon: c.lon,
     area_m2: Math.round(c.area_m2),
+  };
+}
+
+// A place residents reported, once an officer confirms it, becomes a real site at the middle of its
+// reports. Its public name says what it is near (a mapped school or hospital), never where residents stood.
+// Its size isn't known, so it keeps the default planning area; an officer can correct both.
+// A site is public, so a place residents reported sits on a grid of about 200 m (0.002°) rather than at their
+// average position, which for one report is where that resident stood.
+const GRID_DEG = 0.002;
+const snap = (v: number) => Math.round(Math.round(v / GRID_DEG) * GRID_DEG * 1e6) / 1e6;
+
+export function placeSite(place: { ids: number[]; lat: number; lon: number }, near: string | null) {
+  const first = Math.min(...place.ids);
+  return {
+    id: `rep-${first}`,
+    name: near ? `Construction site reported by residents near ${near}` : `Construction site reported by residents (place ${first})`,
+    activity: "excavation",
+    lat: snap(place.lat),
+    lon: snap(place.lon),
   };
 }
 
