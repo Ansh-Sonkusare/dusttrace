@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashIp, LIMITS, parseReport, parseReview, rateLimit } from "../lib/report";
+import { hashIp, LIMITS, parseReport, parseReview, rateLimit, REPORT_ERROR, reportPage } from "../lib/report";
 
 const form = (o: Record<string, string>) => {
   const f = new FormData();
@@ -41,6 +41,12 @@ describe("citizen report form", () => {
     expect(r.ok && r.value.note.length).toBe(500);
   });
 
+  it("says plainly what is wrong with the old messages kept", () => {
+    expect(parseReport(form({ site_id: "A", kind: "spam" }))).toEqual({ ok: false, error: "invalid" });
+    expect(REPORT_ERROR.invalid).toBe("Please pick what you saw.");
+    expect(REPORT_ERROR.too_many).toBe("You have sent several reports already. Please try again later.");
+  });
+
   it("drops the bot honeypot", () => {
     expect(parseReport(form({ site_id: "A", kind: "other", website: "http://spam" })).ok).toBe(false);
   });
@@ -71,5 +77,21 @@ describe("officer review", () => {
     expect(parseReview(form({ id: "42", verdict: "new" })).ok).toBe(false);
     expect(parseReview(form({ id: "4.2", verdict: "verified" })).ok).toBe(false);
     expect(parseReview(form({ verdict: "verified" })).ok).toBe(false);
+  });
+});
+
+describe("a form posted without JavaScript", () => {
+  it("goes back to the page it came from", () => {
+    expect(reportPage("http://localhost:3131/s/osm-way-1?x=1", null)).toBe("/s/osm-way-1");
+    expect(reportPage("https://dusttrace.example/report-dust?r=sent", null)).toBe("/report-dust");
+    expect(reportPage(null, "A")).toBe("/s/A");
+    expect(reportPage(null, null)).toBe("/report-dust");
+  });
+
+  it("never goes anywhere else", () => {
+    expect(reportPage("https://evil.example/phish", null)).toBe("/report-dust");
+    expect(reportPage("http://localhost/sites/A", "B")).toBe("/s/B");
+    expect(reportPage("not a url", null)).toBe("/report-dust");
+    expect(reportPage("http://localhost/s/..%2Fsites", null)).toBe("/report-dust");
   });
 });

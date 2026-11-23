@@ -20,7 +20,7 @@ export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 export const REPORT_ERROR: Record<string, string> = {
   rejected: "This report was not accepted.",
   site: "We could not find that site.",
-  kind: "Please pick what you saw.",
+  invalid: "Please pick what you saw.",
   no_place: "Please share your location, so the officer can find the place.",
   place: "Your location could not be read. Please try again.",
   outside: `DustTrace covers ${WARDS.map((w) => w.name).join(" and ")} for now, and this place is outside them.`,
@@ -43,7 +43,7 @@ export function parseReport(form: FormData): Parsed<Report> {
   const note = String(form.get("note") ?? "").trim().slice(0, 500);
   const [lat, lon, accuracy] = [num(form.get("lat")), num(form.get("lon")), num(form.get("accuracy"))];
   if (site_id !== null && !/^[A-Za-z0-9_-]{1,40}$/.test(site_id)) return { ok: false, error: "site" };
-  if (!(kind in REPORT_KINDS)) return { ok: false, error: "kind" };
+  if (!(kind in REPORT_KINDS)) return { ok: false, error: "invalid" };
   const placed = lat !== null && lon !== null;
   if (!placed && site_id === null) return { ok: false, error: "no_place" };
   if (placed && !(Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180)) {
@@ -67,6 +67,15 @@ export function parseReview(form: FormData): Parsed<{ id: number; verdict: Revie
 
 export function rateLimit(counts: { lastHour: number; sameSiteToday: number }): "ok" | "too_many" {
   return counts.lastHour >= LIMITS.perHour || counts.sameSiteToday >= LIMITS.perSitePerDay ? "too_many" : "ok";
+}
+
+// A form posted without JavaScript is sent back to its own page with ?r=<code>: the page it came from when
+// that is a report page, else the site's page or /report-dust. Only these paths, so it can't redirect away.
+export function reportPage(referer: string | null, siteId: string | null): string {
+  let from = "";
+  try { from = new URL(referer ?? "").pathname; } catch { /* no referer */ }
+  if (/^\/s\/[A-Za-z0-9_-]{1,40}$/.test(from) || from === "/report-dust") return from;
+  return siteId ? `/s/${encodeURIComponent(siteId)}` : "/report-dust";
 }
 
 // Only a salted hash of the address is stored, and only to rate-limit.

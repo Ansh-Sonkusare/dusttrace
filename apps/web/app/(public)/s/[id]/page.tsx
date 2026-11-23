@@ -3,13 +3,15 @@ import Logo from "@/components/Logo";
 import WindowStrip from "@/components/WindowStrip";
 import ReportForm from "@/components/ReportForm";
 import { getDustScores, getLatestRun, getSite, getWard, getWindows } from "@/lib/queries";
-import { REPORT_KINDS } from "@/lib/report";
+import { REPORT_ERROR, REPORT_KINDS } from "@/lib/report";
 import { SCORE_BAND, SCORE_PART } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
+// ?r=… after a form posted without JavaScript: thanks, or why the report was refused.
 const MESSAGE: Record<string, string> = {
   sent: "Thank you. Your report went to the ward environment officer.",
+  ...REPORT_ERROR,
 };
 
 // Public page for residents, opened from the QR code on the site's LED board (PRD F8).
@@ -31,7 +33,7 @@ export default async function PublicSitePage({ params, searchParams }: {
       {(site.demo || run?.data_mode !== "live") && (
         <div className="banner">Demo site for the DustTrace prototype. The score uses simulated monitor data and is not an official rating.</div>
       )}
-      {r && MESSAGE[r] && <div className={`banner ${r === "sent" ? "ok" : ""}`} role="status">{MESSAGE[r]}</div>}
+      {r && Object.hasOwn(MESSAGE, r) && <div className={`banner ${r === "sent" ? "ok" : ""}`} role="status">{MESSAGE[r]}</div>}
 
       <section className="panel">
         <div className="pb score">
