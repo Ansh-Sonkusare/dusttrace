@@ -50,6 +50,9 @@ MIST_LEAD = pd.Timedelta(minutes=90)
 WIND_ONLY = {"plume model", "station attribution"}
 # A notice or stop-work (D8, D9) is about what caused the dust; a missing monitor says nothing about that.
 NOT_A_CAUSE = {"site registry"}
+# A node at a school shows the dust arrived, but only the wind and the plume tie it to this site, so for D8
+# and D9 it is the same line of evidence as the other wind-only signals.
+WIND_ONLY_FOR_CAUSE = WIND_ONLY | {"receptor monitor"}
 
 CAUSES = ["dry_excavation", "demolition", "truck_trackout", "uncovered_debris", "sensor_fault",
           "non_construction", "weather_only"]
@@ -175,7 +178,7 @@ def _day(x: dict) -> str:
     ts = pd.Timestamp(x["ts"]) + pd.Timedelta(hours=5.5)
     n = len(x.get("hours") or [])
     bg = f" against {round(x['background'])} µg/m³ at the other stations" if x.get("background") is not None else ""
-    share = f", about {round(x['added'])} from this site's plume" if x.get("added") else ""
+    share = f", about {round(x['added'])} µg/m³ from this site's plume" if x.get("added") else ""
     shared = x.get("shared_with") or 0
     others = f", shared with {shared} other site{'' if shared == 1 else 's'}" if shared else ""
     return (f"{ts.day} {ts:%b} {ts:%H:%M} IST, {x['station']} {round(x['pm10'])} µg/m³{bg}{share}{others}, "
@@ -186,7 +189,8 @@ def lines(sig: list[str], cause: bool = False) -> list[str]:
     """Independent lines of evidence: the wind-only signals count once. With `cause`, only lines that speak
     to what caused the dust count (for D8 and D9)."""
     sig = [s for s in sig if not (cause and s in NOT_A_CAUSE)]
-    return [s for s in sig if s not in WIND_ONLY] + (["wind"] if WIND_ONLY & set(sig) else [])
+    wind = WIND_ONLY_FOR_CAUSE if cause else WIND_ONLY
+    return [s for s in sig if s not in wind] + (["wind"] if wind & set(sig) else [])
 
 
 def signals(c: SiteContext) -> list[str]:

@@ -821,12 +821,13 @@ def test_d9_stop_work_is_proposed_to_l2_with_a_confirmed_violation_d8_and_a_scho
     _past_exposure(conn, "osm-way-101", rid, hot_hour, issued=now - pd.Timedelta(hours=5))
     pipeline.run(conn, settings)
     first = _case_actions(conn, "osm-way-101")
-    assert ("RECOMMEND_STOP_WORK", "D9") not in first and first[("ISSUE_NOTICE", "D8")] == "proposed"
+    # The school's node and the station both tie the dust to the site through the wind alone: no notice yet.
+    assert ("RECOMMEND_STOP_WORK", "D9") not in first and ("ISSUE_NOTICE", "D8") not in first
     conn.execute("insert into inspections (site_id, outcome, note, officer) values ('osm-way-101','violation','dry cutting','test')")
     conn.commit()
     pipeline.run(conn, settings)
     acts = _case_actions(conn, "osm-way-101")
-    assert acts[("RECOMMEND_STOP_WORK", "D9")] == "proposed"
+    assert acts[("ISSUE_NOTICE", "D8")] == "proposed" and acts[("RECOMMEND_STOP_WORK", "D9")] == "proposed"
     stop = one(conn, """select a.route from case_actions a join cases c on c.id = a.case_id
                          where c.site_id='osm-way-101' and a.action='RECOMMEND_STOP_WORK' and a.phase='final'""")
     assert stop[0] == "L2"

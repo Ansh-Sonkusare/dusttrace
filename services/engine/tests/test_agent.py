@@ -211,7 +211,7 @@ def test_d8_notice_cites_the_measured_station_hours_and_winds_behind_it():
     n = actions(d)["ISSUE_NOTICE"]
     assert (n.route, n.rule, n.status) == ("L1", "D8", "proposed") and d.state == "APPROVAL_ROUTING"
     assert "3 days" in n.reason and "Chakala" in n.reason and "147 µg/m³" in n.reason and "250°" in n.reason
-    assert "against 60 µg/m³ at the other stations" in n.reason and "about 22 from this site's plume" in n.reason
+    assert "against 60 µg/m³ at the other stations" in n.reason and "about 22 µg/m³ from this site's plume" in n.reason
     assert "(2 hours)" in n.reason and "shared with 1 other site" in n.reason
 
 
@@ -278,6 +278,15 @@ def test_d1_a_trigger_on_one_signal_still_gets_no_enforcement():
     for one in ({"satellite_active": True}, {"exceedances_7d": 5}, {"sensitive_node_hot": True, "receptor_node_hot": True}):
         d = agent.decide(ctx(site_id="osm-way-1", has_sensor=False, sensor_known=False, has_relay=False, trust=None, **one))
         assert not {a.action for a in d.final} & agent.ENFORCEMENT_FROM_CAUSE, one
+
+
+def test_d1_a_node_at_a_receptor_does_not_make_station_attribution_a_second_cause():
+    # The node shows dust reached the school; only the wind and the plume tie it to this site, the same tie
+    # station attribution rests on. That still earns an inspection, never a notice or a stop-work.
+    d = agent.decide(ctx(exceedances_7d=3, exceedance_days=DAYS, receptor_node_hot=True, confirmed_violation=False))
+    acts = actions(d)
+    assert "ISSUE_NOTICE" not in acts and "RECOMMEND_STOP_WORK" not in acts
+    assert "ISSUE_NOTICE" in actions(agent.decide(ctx(exceedances_7d=3, receptor_node_hot=True, satellite_active=True)))
 
 
 def test_d1_a_missing_monitor_says_nothing_about_what_caused_the_dust():
