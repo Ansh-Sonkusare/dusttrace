@@ -216,6 +216,15 @@ def write_forecasts(conn, run_id: int, df: pd.DataFrame) -> None:
         )
 
 
+def write_forecast_daily(conn, run_id: int, df: pd.DataFrame) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            "insert into forecast_daily (run_id, station_id, day, starts_at, ends_at, p_exceed) values (%s,%s,%s,%s,%s,%s)",
+            [(run_id, r.station_id, int(r.day), pd.Timestamp(r.starts_at).to_pydatetime(),
+              pd.Timestamp(r.ends_at).to_pydatetime(), float(r.p_exceed)) for r in df.itertuples()],
+        )
+
+
 def write_site_hours(conn, run_id: int, hours) -> None:
     with conn.cursor() as cur:
         plumes, exps, wins = [], [], []
