@@ -19,8 +19,16 @@ describe("console password", () => {
       expect(isPublicPath(p)).toBe(true);
       expect(checkAuth(p, null, "s3cret", true)).toBe("ok");
     }
+    expect(isPublicPath("/report-dust")).toBe(true);
     expect(isPublicPath("/sites/A")).toBe(false);
     expect(isPublicPath("/officer")).toBe(false);
+  });
+
+  it("keeps residents' photos and the report inbox behind the password", () => {
+    for (const p of ["/api/photos/12", "/api/report/photo/12", "/resident-reports"]) {
+      expect(isPublicPath(p)).toBe(false);
+      expect(checkAuth(p, null, "s3cret", true)).toBe("challenge");
+    }
   });
 
   it("refuses to run unprotected in production", () => {
