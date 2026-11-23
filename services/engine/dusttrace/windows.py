@@ -38,6 +38,8 @@ class SiteHour:
     exposures: list[tuple[str, float]] = field(default_factory=list)  # (receptor_id, conc)
     status: str = "go"
     exposed_people: int = 0
+    person_exposure: float = 0.0     # people x increment (µg/m³) over every receptor, however faint
+    person_exposure_15: float = 0.0  # the part over `exposures`, the receptors given 15 µg/m³ or more
     sensitive_hit: bool = False
     reason: str = ""
 
@@ -61,11 +63,13 @@ def evaluate(sites: pd.DataFrame, receptors: pd.DataFrame, wx_future: pd.DataFra
                 xs = np.array([p[0] for p in xy])
                 ys = np.array([p[1] for p in xy])
                 conc = plume.concentration(xs, ys, q, met, setback)
+                sh.person_exposure = float((rec["population"].to_numpy(dtype=float) * conc).sum())
                 worst = None
                 for r, c in zip(rec.itertuples(), conc):
                     if c >= settings.caution_threshold:
                         sh.exposures.append((r.id, float(c)))
                         sh.exposed_people += int(r.population)
+                        sh.person_exposure_15 += float(r.population) * float(c)
                         if r.kind in ("school", "hospital") and c >= settings.avoid_threshold:
                             sh.sensitive_hit = True
                         if worst is None or c > worst[1]:

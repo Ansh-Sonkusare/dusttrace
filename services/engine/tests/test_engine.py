@@ -222,6 +222,27 @@ def test_school_downwind_triggers_avoid_and_clear_afternoon_is_go():
     assert [h.status for h in hours] == ["avoid", "go"]
     assert "West School" in hours[0].reason
     assert hours[0].exposed_people == 1000
+    (rid, conc), = hours[0].exposures
+    assert hours[0].person_exposure_15 == pytest.approx(1000 * conc)  # people x µg/m³ over the exposures rows
+    assert hours[0].person_exposure == pytest.approx(1000 * conc)     # one receptor: nothing fainter to add
+    assert hours[1].person_exposure_15 == 0
+
+
+def test_person_exposure_counts_faint_dust_that_no_exposures_row_holds():
+    sites = pd.DataFrame([{"id": "A", "name": "A", "activity": "demolition", "lat": 19.11, "lon": 72.86, "area_m2": 6000}])
+    town = pd.DataFrame([
+        {"id": "s", "name": "West School", "kind": "school", "lat": 19.11, "lon": 72.855, "population": 1000},
+        {"id": "far", "name": "Homes far west", "kind": "housing", "lat": 19.11, "lon": 72.82, "population": 20000},
+        {"id": "up", "name": "Homes upwind", "kind": "housing", "lat": 19.11, "lon": 72.87, "population": 20000},
+    ])
+    met = plume.Met(1.2, 90, 200, 6.0)
+    wx = pd.DataFrame([{"ts": pd.Timestamp("2026-10-12T00:30Z"), "wind_speed": 1.2, "wind_dir": 90, "blh": 200}])
+    (h,) = windows.evaluate(sites, town, wx, pd.Series(dtype=float), _settings())
+    x, y = plume.to_plume_frame(19.11, 72.86, 19.11, 72.82, met)
+    far = plume.concentration(np.array([x]), np.array([y]), plume.emission_g_s(6000, "demolition"), met, 6000 ** 0.5)[0]
+    assert 0 < far < _settings().caution_threshold
+    assert [r for r, _ in h.exposures] == ["s"]
+    assert h.person_exposure == pytest.approx(h.person_exposure_15 + 20000 * far)  # upwind homes add nothing
 
 
 # ---------- forecast ----------
