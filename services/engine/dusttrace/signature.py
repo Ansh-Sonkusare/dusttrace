@@ -43,27 +43,70 @@ def classify(pm10, pm25, base_pm10, base_ratio, ts) -> str | None:
     return "mixed"
 
 
+def _measured(rd: pd.DataFrame) -> pd.DataFrame:
+    ok = rd[~rd["synthetic"].astype(bool)]
+    if "filled" in ok:
+        ok = ok[~ok["filled"].astype(bool)]
+    ok = ok.dropna(subset=["pm10", "pm25"])
+    return ok[(ok["pm10"] > 0) & (ok["pm25"] > 0)]
+
+
+def baselines(rd: pd.DataFrame, start: pd.Timestamp) -> dict:
+    """Per station: median PM10 and median PM2.5/PM10 over its measured hours in the BASE_DAYS up to `start`."""
+    if rd.empty or "pm25" not in rd:
+        return {}
+    out = {}
+    for sid, g in _measured(rd).groupby("station_id"):
+        base = g[(g["ts"] <= start) & (g["ts"] > start - pd.Timedelta(days=BASE_DAYS))]
+        if len(base) >= BASE_MIN_HOURS:
+            out[sid] = (float(base["pm10"].median()), float((base["pm25"] / base["pm10"]).median()))
+    return out
+
+
 def station_signatures(rd: pd.DataFrame, t0: pd.Timestamp, lookback_h: int = LOOKBACK_H) -> dict:
     """Per station with measured PM10 and PM2.5: the signature of its last `lookback_h` hours."""
     if rd.empty or "pm25" not in rd:
         return {}
-    ok = rd[~rd["synthetic"].astype(bool) & ~rd.get("filled", False).astype(bool)].dropna(subset=["pm10", "pm25"])
-    ok = ok[(ok["pm10"] > 0) & (ok["pm25"] > 0) & (ok["ts"] <= t0)]
+    ok = _measured(rd)
+    ok = ok[ok["ts"] <= t0]
     out = {}
     start = t0 - pd.Timedelta(hours=lookback_h)
+    base = baselines(ok, start)
     for sid, g in ok.groupby("station_id"):
         recent = g[g["ts"] > start]
-        base = g[(g["ts"] <= start) & (g["ts"] > start - pd.Timedelta(days=BASE_DAYS))]
-        if recent.empty or len(base) < BASE_MIN_HOURS:
+        if recent.empty or sid not in base:
             continue
-        base_pm10 = float(base["pm10"].median())
-        base_ratio = float((base["pm25"] / base["pm10"]).median())
+        base_pm10, base_ratio = base[sid]
         last = recent.sort_values("ts").iloc[-1]
         pm10, pm25 = float(recent["pm10"].mean()), float(recent["pm25"].mean())
         out[sid] = {"signature": classify(pm10, pm25, base_pm10, base_ratio, last["ts"]),
                     "pm10": round(pm10, 1), "ratio": round(pm25 / pm10, 3), "base_pm10": round(base_pm10, 1),
                     "base_ratio": round(base_ratio, 3), "ts": pd.Timestamp(last["ts"]).isoformat()}
     return out
+
+
+def day_causes(days: dict[str, list[dict]], base: dict) -> dict[str, str | None]:
+    """Per attributed exceedance day: "fine" when its spike hours were carried by PM2.5 (combustion) more often
+    than by coarse dust, "coarse" the other way round, None when neither (mixed, no PM2.5, no baseline)."""
+    out = {}
+    for day, hours in days.items():
+        n = {"fine": 0, "coarse": 0}
+        for h in hours:
+            b = base.get(h["station_id"])
+            c = classify(h["pm10"], h.get("pm25"), b[0], b[1], h["ts"]) if b else None
+            if c == "fine":
+                n["fine"] += 1
+            elif c in ("coarse_work", "coarse_night"):
+                n["coarse"] += 1
+        out[day] = "fine" if n["fine"] > n["coarse"] else "coarse" if n["coarse"] > n["fine"] else None
+    return out
+
+
+def non_construction(causes: dict[str, str | None]) -> bool:
+    """D10: a non-construction source is most likely when PM2.5 carried most of the site's attributed
+    exceedance days, and at least two (one day can be a one-off fire or fireworks)."""
+    fine = sum(c == "fine" for c in causes.values())
+    return fine >= 2 and fine > len(causes) / 2
 
 
 def _km(lat1, lon1, lat2, lon2) -> float:
