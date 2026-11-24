@@ -149,10 +149,9 @@ export default async function ForecastPage() {
               </tbody>
             </table>
             <p className="small muted" style={{ margin: "12px 0 0" }}>
-              Each input is back-tested on the same window with and without it. It stays on only if the error does not rise and neither F1 falls.
               The festival calendar marks Diwali, Ganeshotsav, Holi, Dasara and New Year. Construction sites upwind counts the hectares of real mapped sites within 3 km in the direction the wind blows from;
-              the site list has no dates, so on past days it uses today&apos;s sites, and sites outside the pilot wards are missing.
-              {trial ? ` ${trial.note ?? ""}` : " Run python -m dusttrace backtest --compare-inputs to try them; until then both stay off."}
+              sites outside the pilot wards are missing.
+              {trial ? ` ${trial.note ?? ""}` : " Each input is back-tested on the same window with and without it, and stays on only if the error does not rise and neither F1 falls. The site list has no dates, so on past days it uses today's sites. Run python -m dusttrace backtest --compare-inputs to try them; until then both stay off."}
             </p>
           </div>
         </section>
