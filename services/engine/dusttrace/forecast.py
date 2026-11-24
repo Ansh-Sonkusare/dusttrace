@@ -3,7 +3,7 @@
 Direct multi-horizon LightGBM: each training row is (origin t0, horizon h) with features known at t0
 (recent PM10 lags) and weather at the target hour t0+h (from the weather forecast in production).
 We fit a median model, 10th/90th percentile models for the range, and a classifier for P(PM10 > 100):
-one set for hours 1-48, exactly as the 48 h forecast had it, and a second set for hours 49-72.
+one set for hours 1-48, exactly as the 48 h forecast had it, and a second set (FAR_STRIDE) for hours 49-72.
 
 The PRD's own quantity, P(24 h mean PM10 > 100) for days 1-3 after t0 (hours 1-24, 25-48, 49-72), comes from
 a second classifier trained on daily rows: features known at t0, weather averaged over the day's 24 h, and
@@ -44,7 +44,10 @@ DAILY_FEATURES = (
 DAILY_OPTIONAL = ["cams_mean_24", "festival", "upwind_sites_ha"]  # averaged over the day's 24 h when the model has them
 MIN_HOURS = 18  # a 24 h mean needs 18 of its 24 hours measured
 NEAR_H = 48  # hours 1-48 keep the 48 h model as it was: Safe-Work Windows and rule D2 read them
-FAR_STRIDE = 5  # hours past NEAR_H come from a second model, trained on origins every 5 h (every hour of day in 5 days)
+# Hours past NEAR_H come from a second model trained on all 72 hours from origins every 6 h. On real K-East
+# (no CAMS, 60 days) it scored 49-72 h MAE 20.4; trained on hours 49-72 only 23.8, on 25-72 22.5. The wider
+# stride keeps the run within about 1.4x the 48 h one.
+FAR_STRIDE = 6
 UPWIND_RADIUS_M = 3000
 UPWIND_HALF_WIDTH = 30  # degrees either side of the direction the wind blows from
 IST = 5.5
@@ -100,7 +103,7 @@ def _origin_features(pm: pd.Series, t0s: pd.DatetimeIndex) -> pd.DataFrame:
 def build_rows(readings: pd.DataFrame, wx: pd.DataFrame, origins: pd.DatetimeIndex | None,
                horizon: int, station_codes: dict[str, int], with_target: bool = True,
                origin_stride: int = 3, cams: pd.DataFrame | None = None, festival: bool = False,
-               upwind: dict[str, np.ndarray] | None = None, first_h: int = 1) -> pd.DataFrame:
+               upwind: dict[str, np.ndarray] | None = None) -> pd.DataFrame:
     w = _prep_weather(wx)
     idx = pd.date_range(w.index.min(), w.index.max(), freq="h", tz="UTC")
     fest = pd.Series(festivals.flag(idx), index=idx) if festival else None
@@ -114,7 +117,7 @@ def build_rows(readings: pd.DataFrame, wx: pd.DataFrame, origins: pd.DatetimeInd
             up = _upwind_hourly(upwind[sid], w["wind_dir"].reindex(idx))
         t0s = origins if origins is not None else idx[24:-1:origin_stride]
         base = _origin_features(pm, t0s)
-        for h in range(first_h, horizon + 1):
+        for h in range(1, horizon + 1):
             tgt = t0s + pd.Timedelta(hours=h)
             df = base.copy()
             df["h"] = h
@@ -280,7 +283,7 @@ def train(readings: pd.DataFrame, wx: pd.DataFrame, horizon: int = 72, threshold
     m, lo, hi, clf = fit_all(data)
     far = None
     if horizon > NEAR_H:  # no held-out split: the scores above are the 48 h model's, as before
-        far = fit_all(build_rows(readings, wx, None, horizon, codes, origin_stride=FAR_STRIDE, first_h=NEAR_H + 1, **inputs))
+        far = fit_all(build_rows(readings, wx, None, horizon, codes, origin_stride=FAR_STRIDE, **inputs))
     days = daily_rows(readings, wx, None, codes, **inputs)
     dfeats = DAILY_FEATURES + [c for c in DAILY_OPTIONAL if c in feats]
     daily = _clf().fit(days[dfeats], (days["y"] > threshold).astype(int))
