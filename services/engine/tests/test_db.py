@@ -297,6 +297,9 @@ def test_compare_inputs_stores_each_input_and_runs_follow_only_real_evidence(con
 
 def test_upwind_sites_use_real_sites_only(conn, settings):
     assert pipeline.upwind_tables(conn, ["seed-chakala"]) is None  # only the demo sites A-F so far
+    db.upsert_sites(conn, [{"id": "osm-way-303", "name": "Far works", "activity": "structure", "lat": 19.2000,
+                            "lon": 72.9500, "area_m2": 50000, "source": "osm"}], "K-East")
+    assert pipeline.upwind_tables(conn, ["seed-chakala"]) is None  # 13 km away: nothing upwind of any station
     _osm_site_near_chakala(conn)
     t = pipeline.upwind_tables(conn, ["seed-chakala"])["seed-chakala"]
     assert t[0] == pytest.approx(3.0) and t[180] == 0  # 3 ha about 530 m north of the station

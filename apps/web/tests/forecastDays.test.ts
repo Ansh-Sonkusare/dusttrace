@@ -77,7 +77,7 @@ describe("new forecast inputs on trial", () => {
 
   it("says when an input was never tried or the evidence isn't real data", () => {
     expect(inputTrials({ festival: change.festival }, undefined)[1]).toMatchObject({ name: "Construction sites upwind", mae: "–",
-      inRuns: false, verdict: "Off: not tried, no real construction sites mapped" });
+      inRuns: false, verdict: "Off: not tried, no real construction site within 3 km of a station" });
     expect(inputTrials(change, { festival: false, upwind_sites: false }, "synthetic")[1].verdict)
       .toBe("Off: tried on synthetic data only, which can't switch it on");
   });

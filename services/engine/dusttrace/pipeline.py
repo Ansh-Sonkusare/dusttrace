@@ -542,12 +542,14 @@ def upwind_tables(conn, station_ids: list[str]) -> dict | None:
     """Mapped construction upwind of each station (forecast.upwind_site_area), from the active real sites (OSM or
     satellite-confirmed, never the demo ones) of every pilot ward. The site list has no history: it says where
     construction is mapped now, not when each site was active, so on past hours this input only tells the model
-    which wind directions carry today's mapped sites towards a station. Sites outside both wards are not listed."""
+    which wind directions carry today's mapped sites towards a station. Sites outside both wards are not listed.
+    None when no site is within reach of any station: the input would be zero everywhere and say nothing."""
     sites = db.read_frame(conn, "select lat, lon, area_m2 from sites where active and not demo")
     if sites.empty:
         return None
     st = db.read_frame(conn, "select id, lat, lon from stations where id = any(%s)", (station_ids,))
-    return forecast.upwind_site_area(st, sites)
+    tables = forecast.upwind_site_area(st, sites)
+    return tables if any(t.any() for t in tables.values()) else None
 
 
 def forecast_inputs(conn, ward_id: str, station_ids: list[str]) -> tuple[dict, dict]:
@@ -672,7 +674,7 @@ def compare_inputs(conn, settings: Settings, days: int = 60) -> dict:
     note = (f"Same window and model, CAMS {'on' if cm is not None else 'off'} as in runs, adding one input at a time. "
             "An input stays on only if the hourly error does not rise and neither exceedance F1 falls. "
             + ("Upwind sites: today's mapped sites, applied to every past hour, since the site list has no dates. "
-               if up is not None else "No real construction sites are mapped, so upwind sites were not tried. ")
+               if up is not None else "No real construction site is mapped within 3 km of a station, so upwind sites were not tried. ")
             + base.note)
     row = conn.execute(
         """insert into backtests (ward_id, kind, data_mode, stations, train_end, test_end, origins, metrics, daily, note)

@@ -53,7 +53,7 @@ export function persistenceNote(ward: Record<string, DayScore> | undefined): str
 export interface InputChange { mae: number; f1_hourly: number; f1_daily: number; on: boolean }
 const INPUTS = [
   { key: "festival", name: "Festival calendar", untried: "not tried" },
-  { key: "upwind_sites", name: "Construction sites upwind", untried: "not tried, no real construction sites mapped" },
+  { key: "upwind_sites", name: "Construction sites upwind", untried: "not tried, no real construction site within 3 km of a station" },
 ] as const;
 
 const signed = (v: number, d: number) => {
