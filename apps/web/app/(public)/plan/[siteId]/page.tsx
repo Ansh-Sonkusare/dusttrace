@@ -6,7 +6,7 @@ import { mistSchedule, planSecret, verifySite } from "@/lib/plan";
 import { fmtExposure, moveText, planGain } from "@/lib/exposure";
 import { spans } from "@/lib/mapHours";
 import { getLastAcceptance, getLatestRun, getSite, getWindows } from "@/lib/queries";
-import { dayHour, hhmm, istHour, STATUS_LABEL } from "@/lib/format";
+import { dayHour, hhmm, istHour, spanText, STATUS_LABEL } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +46,7 @@ export default async function PlanPage({ params, searchParams }: {
           {holds.length === 0 ? <p className="small">No hold needed. Dusty work can go ahead, with the usual water spraying.</p> : (
             <ul className="list">{holds.map((s) => (
               <li key={s.from} className="item"><span className="bar" style={{ background: "var(--avoid)" }} />
-                <div><div className="hd"><b>{STATUS_LABEL.avoid} {dayHour(s.from)}–{until(s.to)}</b></div><p>{s.rows[0].reason}</p>
+                <div><div className="hd"><b>{STATUS_LABEL.avoid} {spanText(s.from, s.to)}</b></div><p>{s.rows[0].reason}</p>
                   <p style={{ color: "var(--text)" }}>{moveText(s)}</p></div></li>
             ))}</ul>
           )}

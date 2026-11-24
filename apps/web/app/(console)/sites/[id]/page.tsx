@@ -9,7 +9,7 @@ import { planSecret, signSite } from "@/lib/plan";
 import { getAudits, getDustScores, getExposureAvoided, getLatestRun, getSite, getSiteExposures, getWard, getWindows } from "@/lib/queries";
 import { EXPOSURE_DEFINITION, fmtExposure, moveText } from "@/lib/exposure";
 import { spans } from "@/lib/mapHours";
-import { ACTIVITY_LABEL, dayHour, FAULT_LABEL, hhmm, istHour, SCORE_BAND, STATUS_LABEL, TRUST_TONE } from "@/lib/format";
+import { ACTIVITY_LABEL, dayHour, FAULT_LABEL, hhmm, istHour, SCORE_BAND, spanText, STATUS_LABEL, TRUST_TONE } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +51,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                     <li key={s.from} className="item">
                       <span className="bar" style={{ background: `var(--${s.status})` }} />
                       <div>
-                        <div className="hd"><b>{STATUS_LABEL[s.status]}</b> {dayHour(s.from)}–{end(s.to)}</div>
+                        <div className="hd"><b>{STATUS_LABEL[s.status]}</b> {spanText(s.from, s.to)}</div>
                         <p>{s.rows.reduce((a, b) => (b.exposed_people > a.exposed_people ? b : a)).reason}</p>
                         {s.status === "avoid" && <p style={{ color: "var(--text)" }}>{moveText(s)}</p>}
                       </div>

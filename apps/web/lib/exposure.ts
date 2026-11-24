@@ -25,7 +25,8 @@ export function moveText(span: { rows: WindowRow[] }): string {
     else ranges.push({ from: t, to: t + HOUR });
   }
   const iso = (t: number) => new Date(t).toISOString();
-  const where = ranges.map((r, i) => `${i === 0 ? dayHour(iso(r.from)) : hhmm(iso(r.from))}–${hhmm(iso(r.to))}`).join(" and ");
+  const day = (t: number) => new Date(t + 5.5 * HOUR).toISOString().slice(0, 10);
+  const where = ranges.map((r, i) => `${i > 0 && day(r.from) === day(ranges[i - 1].from) ? hhmm(iso(r.from)) : dayHour(iso(r.from))}–${hhmm(iso(r.to))}`).join(" and ");
   return stuck === 0 ? `Move the work to ${where}.` : `Move ${to.length} h to ${where}; no better hour that day for the other ${stuck} h.`;
 }
 

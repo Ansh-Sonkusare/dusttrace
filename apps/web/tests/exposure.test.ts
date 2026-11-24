@@ -21,6 +21,13 @@ describe("where to move the work in an Avoid span", () => {
     expect(moveText(s)).toBe("Move the work to Tue 08:00–09:00 and 12:00–14:00.");
   });
 
+  it("names the day whenever it changes, for a span across midnight", () => {
+    const wed = (h: number) => ist(h + 24);
+    const s = span([row(20, "avoid", { move_to: ist(17) }), row(21, "avoid", { move_to: ist(9) }),
+                    row(30, "avoid", { move_to: wed(17) })]);   // Wed 06:00
+    expect(moveText(s)).toBe("Move the work to Tue 09:00–10:00 and 17:00–18:00 and Wed 17:00–18:00.");
+  });
+
   it("covers early mornings: dusty work is allowed from 06:00", () => {
     expect(moveText(span([row(6, "avoid", { move_to: ist(15) }), row(7, "avoid", { move_to: ist(16) })])))
       .toBe("Move the work to Tue 15:00–17:00.");

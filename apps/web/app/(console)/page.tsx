@@ -8,7 +8,7 @@ import { EXPOSURE_DEFINITION, fmtExposure, moveText } from "@/lib/exposure";
 import { kpiTiles } from "@/lib/kpi";
 import { dataNotice } from "@/lib/notice";
 import { buildMapHours, spans } from "@/lib/mapHours";
-import { dayHour, hhmm } from "@/lib/format";
+import { spanText } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -101,7 +101,7 @@ export default async function Overview() {
                         <span className="bar" style={{ background: "var(--avoid)" }} />
                         <div>
                           <div className="hd"><b>{siteLabel(site.id, site.name)}</b></div>
-                          <div className="small" style={{ marginTop: 2 }}>Avoid {dayHour(sp.from)}–{hhmm(new Date(new Date(sp.to).getTime() + 3600_000).toISOString())}</div>
+                          <div className="small" style={{ marginTop: 2 }}>Avoid {spanText(sp.from, sp.to)}</div>
                           <p>{sp.rows[0].reason}</p>
                           <p style={{ color: "var(--text)" }}>{moveText(sp)}</p>
                         </div>

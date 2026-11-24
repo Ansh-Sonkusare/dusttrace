@@ -12,6 +12,15 @@ export function dayHour(ts: string): string {
   return `${new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "short" }).format(new Date(ts))} ${hhmm(ts)}`;
 }
 
+const istDate = (ts: string) => new Intl.DateTimeFormat("en-GB", { timeZone: TZ, dateStyle: "short" }).format(new Date(ts));
+
+// A span of forecast hours, from the start of `from` to the end of the hour starting `last`: "Tue 09:30–11:30", or
+// "Tue 19:30–Wed 07:30" when it ends on another day.
+export function spanText(from: string, last: string): string {
+  const end = new Date(new Date(last).getTime() + 3600_000).toISOString();
+  return `${dayHour(from)}–${istDate(end) === istDate(from) ? hhmm(end) : dayHour(end)}`;
+}
+
 export function istHour(ts: string): number {
   return Number(new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", hour12: false }).format(new Date(ts))) % 24;
 }
