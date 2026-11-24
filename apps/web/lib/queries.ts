@@ -39,7 +39,12 @@ export interface Audit {
   vendor: string | null; has_relay: boolean; simulated: boolean; injected_fault: string | null;
   calibrated_on: string | null; station: string | null; imagery: string | null;
 }
-export interface WindowRow { site_id: string; ts: string; status: Status; exposed_people: number; sensitive_hit: boolean; reason: string }
+export interface WindowRow {
+  site_id: string; ts: string; status: Status; exposed_people: number; sensitive_hit: boolean; reason: string;
+  // person·µg/m³ this hour, all dust and at receptors given 15 µg/m³ or more; where an Avoid hour's work moves and
+  // what that keeps off people
+  person_exposure: number; person_exposure_15: number; move_to: string | null; avoided: number; avoided_15: number;
+}
 export interface PlumeRow { site_id: string; ts: string; geojson: string | null; max_conc: number }
 export interface WxRow { ts: string; wind_speed: number; wind_dir: number; blh: number }
 
@@ -119,11 +124,76 @@ export async function getStations(ids?: string[]): Promise<Station[]> {
 
 export async function getWindows(runId: number, siteId?: string): Promise<WindowRow[]> {
   const r = await q<WindowRow>(
-    `select site_id, ts, status, exposed_people, sensitive_hit, reason from safe_windows
+    `select site_id, ts, status, exposed_people, sensitive_hit, reason, person_exposure, person_exposure_15, move_to,
+            avoided, avoided_15 from safe_windows
       where run_id=$1 and ($2::text is null or site_id=$2) order by site_id, ts`,
     [runId, siteId ?? null],
   );
-  return r.map((w) => ({ ...w, ts: iso(w.ts) }));
+  return r.map((w) => ({ ...w, ts: iso(w.ts), move_to: w.move_to ? iso(w.move_to) : null }));
+}
+
+export interface SiteExposure {
+  site_id: string; name: string; demo: boolean; without_plan: number; with_plan: number; avoided: number; avoided_pct: number | null;
+  without_15: number; avoided_15: number; avoided_15_pct: number | null; moved_hours: number; stuck_hours: number;
+}
+
+// Person-exposure avoided per site for a run (F7), the most avoidable first.
+export async function getExposureAvoided(runId: number, siteId?: string): Promise<SiteExposure[]> {
+  return q<SiteExposure>(
+    `select e.site_id, s.name, s.demo, e.without_plan, e.with_plan, e.avoided, e.avoided_pct, e.without_15, e.avoided_15,
+            e.avoided_15_pct, e.moved_hours, e.stuck_hours
+       from exposure_avoided e join sites s on s.id = e.site_id
+      where e.run_id=$1 and ($2::text is null or e.site_id=$2) order by e.avoided desc, e.site_id`,
+    [runId, siteId ?? null],
+  );
+}
+
+// Ward totals for a run's real sites, demo sites apart, and what plans accepted from it keep off people
+// (view exposure_avoided_ward, migration 0024).
+export interface WardExposure {
+  sites: number; without_plan: number; with_plan: number; avoided: number; avoided_pct: number | null;
+  without_15: number; avoided_15: number; avoided_15_pct: number | null; sites_with_avoid: number;
+  moved_hours: number; stuck_hours: number; demo_sites: number; demo_avoided: number;
+  accepted_plans: number; accepted_sites: number; accepted_avoided: number; accepted_avoided_15: number;
+  without_ward: number; avoided_ward: number; avoided_ward_pct: number | null; // people inside the ward's boundary
+}
+
+export async function getWardExposure(runId: number): Promise<WardExposure | null> {
+  const r = await q<WardExposure>("select * from exposure_avoided_ward where run_id=$1", [runId]);
+  return r[0] ?? null;
+}
+
+// What the plans real sites accepted from runs issued in the last `days` days keep off people, if followed.
+export async function getAcceptedAvoided(days = 7): Promise<{ avoided: number; avoided_15: number; plans: number }> {
+  const r = await q<{ avoided: number; avoided_15: number; plans: number }>(
+    `select coalesce(sum(accepted_avoided), 0)::float as avoided, coalesce(sum(accepted_avoided_15), 0)::float as avoided_15,
+            coalesce(sum(accepted_plans), 0)::int as plans
+       from exposure_avoided_ward where ward_id=$1 and issued_at > now() - make_interval(days => $2)`,
+    [await ward(), days],
+  );
+  return r[0] ?? { avoided: 0, avoided_15: 0, plans: 0 };
+}
+
+// Person-exposure at real sites over the last `days` days, as forecast at the time: each site hour from the latest
+// run issued before it that worked the metric out. Without the plans, and what following every plan would have
+// kept off people.
+type PastExposure = { without: number; avoided: number; without_15: number; avoided_15: number; hours: number };
+export async function getPastExposure(days = 7): Promise<PastExposure> {
+  const r = await q<PastExposure>(
+    `with inforce as (
+       select distinct on (w.site_id, w.ts) w.ts, w.person_exposure, w.avoided, w.person_exposure_15, w.avoided_15
+         from safe_windows w join runs r on r.id = w.run_id join sites s on s.id = w.site_id
+        where r.ward_id=$1 and not s.demo and exists (select 1 from exposure_avoided x where x.run_id = r.id)
+          and r.issued_at > now() - make_interval(days => $2 + 2) and r.issued_at < w.ts
+          and w.ts > now() - make_interval(days => $2) and w.ts <= now()
+        order by w.site_id, w.ts, r.issued_at desc, r.id desc)
+     select coalesce(sum(person_exposure) filter (where extract(epoch from (ts at time zone 'Asia/Kolkata')::time) / 3600 between 6 and 21), 0)::float as without,
+            coalesce(sum(avoided), 0)::float as avoided,
+            coalesce(sum(person_exposure_15) filter (where extract(epoch from (ts at time zone 'Asia/Kolkata')::time) / 3600 between 6 and 21), 0)::float as without_15,
+            coalesce(sum(avoided_15), 0)::float as avoided_15, count(distinct ts)::int as hours from inforce`,
+    [await ward(), days],
+  );
+  return r[0] ?? { without: 0, avoided: 0, without_15: 0, avoided_15: 0, hours: 0 };
 }
 
 export async function getPlumes(runId: number): Promise<PlumeRow[]> {

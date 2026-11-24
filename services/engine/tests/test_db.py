@@ -917,3 +917,110 @@ def test_d9_stop_work_is_proposed_to_l2_with_a_confirmed_violation_d8_and_a_scho
                          where c.site_id='osm-way-101' and a.action='RECOMMEND_STOP_WORK' and a.phase='final'""")
     assert stop[0] == "L2"
     assert "node_at_school_or_hospital" in one(conn, "select triggers from cases where site_id='osm-way-101' and closed_at is null")[0]
+
+
+def _pin_forecast_weather(conn):
+    """Calm easterly air at 06:00 and 20:00-22:00 IST (site A's plume onto the school west of it: Avoid) and a westerly
+    breeze otherwise, so the run has Avoid hours with better hours the same day whatever the synthetic weather."""
+    calm = "extract(hour from ts at time zone 'Asia/Kolkata') in (6, 20, 21)"
+    conn.execute(f"""update weather_hourly set precip = 0, wind_dir = case when {calm} then 73 else 270 end,
+                       wind_speed = case when {calm} then 1.2 else 4 end, blh = case when {calm} then 200 else 1200 end
+                     where ward_id = 'K-East' and ts > now() - interval '3 hours'""")
+    conn.commit()
+
+
+def test_run_stores_exposure_avoided_per_site_and_for_the_ward(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    _pin_forecast_weather(conn)
+    rid = pipeline.run(conn, settings)["run_id"]
+    rows = {r[0]: r[1:] for r in conn.execute(
+        """select site_id, without_plan, with_plan, avoided, avoided_pct, without_15, with_15, avoided_15, avoided_15_pct,
+                  moved_hours, stuck_hours, without_ward from exposure_avoided where run_id=%s""", (rid,)).fetchall()}
+    assert sorted(rows) == list("ABCDEF")
+    allowed = "extract(epoch from ({} at time zone 'Asia/Kolkata')::time) / 3600 between 6 and 21"  # ends by 22:00
+    # The 15 µg/m³ figure by hand from the exposures rows: people x µg/m³ added, over the hours 06:00-22:00 IST.
+    by_hand = dict(conn.execute(
+        f"""select s.id, coalesce(sum(r.population * e.conc::float8) filter (where {allowed.format('e.ts')}), 0)
+              from sites s left join exposures e on e.site_id = s.id and e.run_id = %s
+              left join receptors r on r.id = e.receptor_id where s.ward_id = 'K-East' group by s.id""", (rid,)).fetchall())
+    per_hour = {r[0]: r[1:] for r in conn.execute(
+        f"""select site_id, sum(person_exposure::float8) filter (where {allowed.format('ts')}),
+                   sum(avoided::float8), sum(avoided_15::float8),
+                   count(*) filter (where status = 'avoid' and {allowed.format('ts')}),
+                   sum(person_exposure_ward::float8) filter (where {allowed.format('ts')})
+              from safe_windows where run_id=%s group by site_id""", (rid,)).fetchall()}
+    for sid, (wo, wi, av, pct, wo15, wi15, av15, pct15, moved, stuck, wo_ward) in rows.items():
+        hour_wo, hour_av, hour_av15, avoid_hours, hour_wo_ward = per_hour[sid]
+        assert wo_ward == pytest.approx(hour_wo_ward, rel=1e-4, abs=5) and 0 <= wo_ward <= wo + 1  # inside the boundary
+        assert wo15 == pytest.approx(float(by_hand[sid]), rel=1e-4, abs=1)
+        assert wo == pytest.approx(hour_wo, rel=1e-4, abs=5) and wo >= wo15 - 1  # faint dust adds to the rows
+        assert av >= 0 and av15 >= 0 and wi == pytest.approx(wo - av, abs=1) and wi15 == pytest.approx(wo15 - av15, abs=1)
+        assert av == pytest.approx(hour_av, rel=1e-4, abs=5) and av15 == pytest.approx(hour_av15, rel=1e-4, abs=5)
+        assert moved + stuck == avoid_hours
+        if avoid_hours == 0:
+            assert av == av15 == 0
+        if wo:
+            assert pct == pytest.approx(100 * av / wo, abs=0.01)
+    # Each moved hour names an open hour of the same IST day, lower on both counts, and its gain is what it keeps off.
+    moves = conn.execute(
+        """select (w.ts at time zone 'Asia/Kolkata')::date = (d.ts at time zone 'Asia/Kolkata')::date, d.status,
+                  w.person_exposure - d.person_exposure, w.avoided, w.person_exposure_15 - d.person_exposure_15, w.avoided_15
+             from safe_windows w join safe_windows d on d.run_id = w.run_id and d.site_id = w.site_id and d.ts = w.move_to
+            where w.run_id=%s""", (rid,)).fetchall()
+    assert len(moves) == sum(r[8] for r in rows.values()) > 0
+    for same_day, status, gain, avoided, gain15, avoided15 in moves:
+        assert same_day and status != "avoid" and gain > 0 and gain15 > 0
+        assert avoided == pytest.approx(gain, rel=1e-3, abs=1) and avoided15 == pytest.approx(gain15, rel=1e-3, abs=1)
+    assert one(conn, "select count(*) from safe_windows where run_id=%s and move_to is not null and status <> 'avoid'",
+               (rid,))[0] == 0
+    ward = one(conn, """select sites, avoided, demo_sites, demo_avoided, accepted_plans, accepted_avoided
+                          from exposure_avoided_ward where run_id=%s""", (rid,))
+    assert ward[:2] == (0, 0)  # the seed's sites are all demo: kept out of the ward total, and counted apart
+    assert ward[2] == 6 and ward[3] == pytest.approx(sum(r[2] for r in rows.values()), abs=1)
+    assert ward[4:] == (0, 0)
+
+
+def test_the_ward_view_counts_what_accepted_plans_keep_off_people(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    _pin_forecast_weather(conn)
+    rid = pipeline.run(conn, settings)["run_id"]
+    site, first = one(conn, """select site_id, min(ts) from safe_windows where run_id=%s and move_to is not null
+                                group by site_id order by 2, 1 limit 1""", (rid,))
+    other = one(conn, "select min(site_id) from safe_windows where run_id=%s and move_to is not null and site_id <> %s",
+                (rid, site))[0]
+    conn.execute("update sites set demo = false where id = %s", (site,))  # a real site; the rest stay demo
+    ward = "select sites, avoided, accepted_plans, accepted_sites, accepted_avoided from exposure_avoided_ward where run_id=%s"
+    assert one(conn, ward, (rid,))[0] == 1 and one(conn, ward, (rid,))[2:] == (0, 0, 0)
+    assert one(conn, "select without_ward from exposure_avoided_ward where run_id=%s", (rid,))[0] == pytest.approx(
+        one(conn, "select without_ward from exposure_avoided where run_id=%s and site_id=%s", (rid, site))[0])
+
+    # The manager accepts the plan an hour before the site's first moved hour.
+    at = first - pd.Timedelta(hours=1)
+    conn.execute("insert into plan_acceptances (site_id, run_id, avoid_hours, accepted_at) values (%s,%s,1,%s)",
+                 (site, rid, at))
+    issued = one(conn, "select issued_at from runs where id=%s", (rid,))[0]
+    kept = one(conn, """select sum(avoided::float8) from safe_windows where run_id=%s and site_id=%s and move_to >= %s
+                          and ts >= %s and ts <= %s""", (rid, site, at, at, issued + pd.Timedelta(hours=24)))[0]
+    assert kept > 0 and one(conn, ward, (rid,))[2:4] == (1, 1)
+    assert one(conn, ward, (rid,))[4] == pytest.approx(kept, rel=1e-6)
+    # Accepting again later takes over the hours after it; nothing is counted twice.
+    conn.execute("insert into plan_acceptances (site_id, run_id, avoid_hours, accepted_at) values (%s,%s,1,%s)",
+                 (site, rid, at + pd.Timedelta(minutes=30)))
+    assert one(conn, ward, (rid,))[4] == pytest.approx(kept, rel=1e-6)
+    # A demo site's accepted plan stays out of the ward figure.
+    if other:
+        conn.execute("insert into plan_acceptances (site_id, run_id, avoid_hours, accepted_at) values (%s,%s,1,%s)",
+                     (other, rid, issued))
+        assert one(conn, ward, (rid,))[3:] == (1, pytest.approx(kept, rel=1e-6))
+    conn.rollback()
+
+
+def test_forecast_rain_reaches_the_windows_through_the_run(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    conn.execute("update weather_hourly set precip = 3 where ward_id = 'K-East' and ts > now() - interval '3 hours'")
+    conn.commit()
+    rid = pipeline.run(conn, settings)["run_id"]
+    rows = conn.execute("select status, reason, person_exposure from safe_windows where run_id=%s", (rid,)).fetchall()
+    assert rows and all(s != "avoid" and "rain (3.0 mm) keeps the dust down" in r and pe == 0 for s, r, pe in rows)
+    assert one(conn, "select count(*) from exposures where run_id=%s", (rid,))[0] == 0
+    assert one(conn, "select max(avoided) from exposure_avoided where run_id=%s", (rid,))[0] == 0

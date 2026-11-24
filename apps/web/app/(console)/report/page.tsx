@@ -1,6 +1,7 @@
 import TopBar from "@/components/TopBar";
 import NoRun from "@/components/Empty";
-import { getLatestRun, getWard, getWeeklyData } from "@/lib/queries";
+import { getAcceptedAvoided, getExposureAvoided, getLatestRun, getPastExposure, getWard, getWardExposure, getWeeklyData } from "@/lib/queries";
+import { EXPOSURE_DEFINITION, fmtExposure } from "@/lib/exposure";
 import { ACTION_LABEL } from "@/lib/format";
 import { OUTCOMES } from "@/lib/officer";
 import { countBy, spikeDays, type DayResult } from "@/lib/weekly";
@@ -18,7 +19,9 @@ const dayName = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en
 export default async function WeeklyReport() {
   const [ward, run] = await Promise.all([getWard(), getLatestRun()]);
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
-  const w = await getWeeklyData();
+  const [w, past, accepted, bySite, ex] = await Promise.all([getWeeklyData(), getPastExposure(), getAcceptedAvoided(),
+    getExposureAvoided(run.id), getWardExposure(run.id)]);
+  const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : "–");
   const days = spikeDays(w.forecast, w.observed);
   const rules = countBy(w.actions, "rule");
   const acts = countBy(w.actions, "action");
@@ -49,6 +52,40 @@ export default async function WeeklyReport() {
                 ))}</tbody>
               </table>
             )}
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="ph"><h2>Dust kept off people by Safe-Work Windows</h2><span className="meta">Person·µg/m³·h · safe_windows, exposure_avoided, plan_acceptances</span></div>
+          <div className="pb">
+            <table className="tbl">
+              <thead><tr><th>Hours</th><th>Without the plans</th><th>Avoidable by following them</th><th>Share</th><th>Share at 15 µg/m³ or more</th></tr></thead>
+              <tbody>
+                <tr><td>Last 7 days, as forecast at the time ({past.hours} h)</td>
+                  {past.hours === 0 ? <td colSpan={4} className="muted">No forecast covered these hours</td> : <>
+                    <td className="tab">{fmtExposure(past.without)}</td><td className="tab">{fmtExposure(past.avoided)}</td><td className="tab">{pct(past.avoided, past.without)}</td>
+                    <td className="tab">{pct(past.avoided_15, past.without_15)}</td></>}</tr>
+                <tr><td>Next 48 h, latest run{ex && ex.demo_sites > 0 ? ` (${ex.demo_sites} demo ${ex.demo_sites === 1 ? "site" : "sites"} not counted)` : ""}</td>
+                  {!ex ? <td colSpan={4} className="muted">Not worked out for this run</td> : <>
+                    <td className="tab">{fmtExposure(ex.without_plan)}</td><td className="tab">{fmtExposure(ex.avoided)}</td><td className="tab">{pct(ex.avoided, ex.without_plan)}</td>
+                    <td className="tab">{pct(ex.avoided_15, ex.without_15)}</td></>}</tr>
+                {ex && <tr><td>Of which inside the ward&apos;s boundary (the rest: neighbouring wards&apos; homes, estimated from this ward&apos;s density)</td>
+                  <td className="tab">{fmtExposure(ex.without_ward)}</td><td className="tab">{fmtExposure(ex.avoided_ward)}</td>
+                  <td className="tab">{pct(ex.avoided_ward, ex.without_ward)}</td><td className="muted">–</td></tr>}
+                <tr><td>Plans sites accepted in the last 7 days{accepted.plans ? ` (${accepted.plans})` : ""}</td>
+                  <td className="muted">–</td><td className="tab">{accepted.plans ? fmtExposure(accepted.avoided) : "None accepted"}</td><td className="muted" colSpan={2}>If followed</td></tr>
+              </tbody>
+            </table>
+            {bySite.some((x) => x.avoided > 0 && !x.demo) && (
+              <table className="tbl" style={{ marginTop: 12 }}>
+                <thead><tr><th>Most avoidable, latest run</th><th>Without the plan</th><th>Avoidable</th><th>Share</th><th>Share at 15 µg/m³ or more</th></tr></thead>
+                <tbody>{bySite.filter((x) => x.avoided > 0 && !x.demo).slice(0, 5).map((x) => (
+                  <tr key={x.site_id}><td>{siteLabel(x.site_id, x.name)}</td><td className="tab">{fmtExposure(x.without_plan)}</td>
+                    <td className="tab">{fmtExposure(x.avoided)}</td><td className="tab">{pct(x.avoided, x.without_plan)}</td><td className="tab">{pct(x.avoided_15, x.without_15)}</td></tr>
+                ))}</tbody>
+              </table>
+            )}
+            <p className="small muted" style={{ margin: "10px 0 0" }}>{EXPOSURE_DEFINITION} Real sites only. Accepted plans count from the hour they were accepted to the end of the plan&apos;s 24 h; whether a site moved its work is not checked.</p>
           </div>
         </section>
 
