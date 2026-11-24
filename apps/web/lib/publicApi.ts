@@ -2,6 +2,8 @@
 // Scores. Shapes are explicit so nothing personal or internal leaks: no receptor names, people counts,
 // officer notes or citizen reports. Pure, so they're unit-tested.
 
+import { weatherNote } from "./forecastDays";
+
 export const API_LIMIT = 120; // requests per hour per address
 export const apiRateLimit = (lastHour: number): "ok" | "too_many" => (lastHour >= API_LIMIT ? "too_many" : "ok");
 
@@ -9,7 +11,7 @@ const r1 = (x: number) => Math.round(x * 10) / 10;
 
 interface RunLike {
   id: number; issued_at: string; data_mode: string; model: string;
-  metrics: { newest_real_reading?: string | null; filled?: { stations: number; hours: number } };
+  metrics: { newest_real_reading?: string | null; filled?: { stations: number; hours: number }; forecast_hours?: number; weather_hours?: number };
 }
 
 export function publicForecast(run: RunLike, points: { ts: string; pm10: number; pm10_lo: number; pm10_hi: number; p_exceed: number }[], ward: string,
@@ -24,6 +26,9 @@ export function publicForecast(run: RunLike, points: { ts: string; pm10: number;
     model: run.model,
     units: "µg/m³",
     sources: ["CPCB stations via OpenAQ", "Copernicus CAMS via Open-Meteo (fills feed gaps, flagged)", "Open-Meteo weather"],
+    // Hours after issued_at with a weather forecast; the PM10 forecast stops there. Null for runs before it was recorded.
+    weather_hours: run.metrics.weather_hours ?? null,
+    note: weatherNote(run.metrics.weather_hours, run.metrics.forecast_hours ?? 72),
     hours: points.map((p) => ({ ts: p.ts, pm10: r1(p.pm10), pm10_lo: r1(p.pm10_lo), pm10_hi: r1(p.pm10_hi), p_exceed_100: Math.round(p.p_exceed * 100) / 100 })),
     // P(24 h mean PM10 > 100) for the ward, for the 24 h from `from` to `to` (first and last forecast hour).
     daily_24h_mean: days.filter((d) => d.station_id === "ward").sort((a, b) => a.day - b.day)

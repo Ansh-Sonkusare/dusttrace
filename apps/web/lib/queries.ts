@@ -24,6 +24,7 @@ export interface Run {
     filled?: { stations: number; hours: number; corrections?: Record<string, { slope: number; intercept: number; mae: number; hours: number }> };
     inputs?: { hours: number; real: number; filled: number; synthetic: number };
     forecast_hours?: number;
+    weather_hours?: number;
     forecast_inputs?: { cams: boolean; festival: boolean; upwind_sites: boolean; evidence: number | null };
   };
 }
@@ -288,12 +289,14 @@ export async function getKpis(run: Run): Promise<import("./kpi").KpiRaw> {
            decisions: x.decisions, new_reports: x.reports };
 }
 
-type BtBucket = { n: number; mae_model: number; mae_persistence: number; f1_exceed_model: number; f1_exceed_persistence: number; coverage_10_90: number; exceed_rate: number };
-export type BtDay = { n: number; exceed_days: number; hits: number; misses: number; false_alarms: number; f1_model: number; f1_persistence: number; brier: number };
+// F1 is null when the window measured nothing above 100 and nothing was called.
+type BtBucket = { n: number; mae_model: number; mae_persistence: number; f1_exceed_model: number | null; f1_exceed_persistence: number | null; coverage_10_90: number; exceed_rate: number };
+export type BtDay = { n: number; exceed_days: number; hits: number; misses: number; false_alarms: number; f1_model: number | null; f1_persistence: number | null; brier: number };
 export interface Backtest {
   id: number; created_at: string; data_mode: string; stations: string[]; train_end: string; test_end: string; origins: number;
   metrics: Record<string, BtBucket>;
-  daily: { ward?: Record<string, BtDay>; stations?: Record<string, BtDay> } | null;
+  daily: { ward?: Record<string, BtDay>; stations?: Record<string, BtDay>;
+           window?: { ward_days: number; ward_exceed_days: number; station_days: number; station_exceed_days: number } } | null;
   spike_day: { day: string; actual_mean: number; issued_at: string | null; lead_hours?: number; forecast_mean?: number; p_exceed_max?: number; flagged?: boolean } | null;
   note: string | null;
 }

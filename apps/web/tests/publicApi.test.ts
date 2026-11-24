@@ -26,6 +26,14 @@ describe("public API", () => {
     expect(publicForecast(run, [hour], "K-East").daily_24h_mean).toEqual([]);
   });
 
+  it("forecast says where it stops when the weather forecast runs out", () => {
+    const short = { ...run, metrics: { ...run.metrics, forecast_hours: 72, weather_hours: 60 } };
+    const f = publicForecast(short, [], "K-East");
+    expect(f.weather_hours).toBe(60);
+    expect(f.note).toBe("The forecast stops at hour 60 because the weather forecast does. Day 3 has under 18 hours of weather, so it has no daily chance.");
+    expect(publicForecast(run, [], "K-East").note).toBeNull();
+  });
+
   it("windows are per site and hour, without receptor names or people counts", () => {
     const w = publicWindows([{ site_id: "osm-way-1", ts: "2026-10-12T09:00:00.000Z", status: "avoid", exposed_people: 900, sensitive_hit: true,
       reason: "Plume reaches Marol Maternity Home" }], [{ id: "osm-way-1", name: "Metro Casting Yard", demo: false, source: "osm", lat: 19.1, lon: 72.8 }]);
