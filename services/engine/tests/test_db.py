@@ -100,6 +100,50 @@ def test_run_audits_every_site_sensor(conn, settings):
     assert one(conn, "select bool_and(synthetic), count(*) > 0 from site_readings") == (True, True)
     bench = out["metrics"]["audit"]
     assert bench["precision"] >= 0.9 and bench["recall"] >= 0.85
+    assert set(bench["methods"]) == {"rules", "forest", "both"} and bench["n"] == 50
+    assert set(bench["methods"]["forest"]["detected"]) == {"none", "flatline", "dropout", "too_clean", "drift", "rh_bias"}
+    names = {r[0]: r[1] for r in conn.execute("select id, name from stations").fetchall()}
+    st = bench["stations"]
+    assert st and all(names[k] == v["name"] for k, v in st.items()) and sum(v["sensors"] for v in st.values()) == 50
+    assert all(v["measured"] + v["next_station"] + v["interpolated"] == v["hours"] == 168 for v in st.values())
+    assert bench["synthetic_ambient"] is True  # a synthetic run says so
+    assert bench["nodes"] == []
+
+
+def test_the_forest_compares_with_dusttrace_nodes_when_the_ward_has_them(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    hours = pd.date_range(end=pipeline.now_hour(), periods=24 * 8, freq="h", tz="UTC")
+    _node_with_hours(conn, "node-marol", 19.117, 72.879, pipeline.now_hour(), {h: 70.0 for h in hours})
+    assert pipeline.run(conn, settings)["metrics"]["audit"]["nodes"] == ["node-marol"]
+
+
+def test_run_gives_simulated_sensors_a_calibration_date_and_names_their_station(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    out = pipeline.run(conn, settings)
+    rows = conn.execute("""select n.calibrated_on, a.checks from site_sensors n
+                             join sensor_audits a on a.sensor_id = n.id and a.run_id=%s""", (out["run_id"],)).fetchall()
+    issued = pd.Timestamp(out["issued_at"]).date()
+    assert rows and all(0 <= (issued - r[0]).days < 30 for r in rows)  # monthly, on schedule
+    stations = {r[0] for r in conn.execute("select name from stations").fetchall()}
+    assert all(r[1]["neighbour"]["station"] in stations and r[1]["calibration"]["ok"] for r in rows)
+    assert all(r[1]["calibration"]["on"] == r[0].isoformat() for r in rows)  # the run keeps the date it used
+
+
+def test_only_a_recent_scene_up_to_the_audited_week_counts_as_active(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    now = pipeline.now_hour()
+    for site, d in (("A", now - pd.Timedelta(days=10)),    # recent: counts
+                    ("B", now - pd.Timedelta(days=200)),   # found today, but an old scene
+                    ("C", now + pd.Timedelta(days=5)),     # after the audited week
+                    ("E", now)):                           # today: the id has no time, so it may be after the hour
+        conn.execute("""insert into site_candidates (ward_id, scene_before, scene_after, lat, lon, area_m2, site_id)
+                        values ('K-East', 'S2B_43QBV_20250101_0_L2A', %s, 19.1, 72.86, 9000, %s)""",
+                     (f"S2B_43QBV_{d:%Y%m%d}_0_L2A", site))
+    conn.commit()
+    out = pipeline.run(conn, settings)
+    checks = dict(conn.execute("select site_id, checks from sensor_audits where run_id=%s", (out["run_id"],)).fetchall())
+    assert checks["A"]["work_signature"]["imagery"] == f"{now - pd.Timedelta(days=10):%Y-%m-%d}"
+    assert all(checks[s]["work_signature"]["imagery"] is None for s in "BCE")
 
 
 def test_run_ranks_every_site_for_inspection(conn, settings):
