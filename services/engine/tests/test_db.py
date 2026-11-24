@@ -102,8 +102,10 @@ def test_run_audits_every_site_sensor(conn, settings):
     assert set(bench["methods"]) == {"rules", "forest", "both"} and bench["n"] == 50
     assert set(bench["methods"]["forest"]["detected"]) == {"none", "flatline", "dropout", "too_clean", "drift", "rh_bias"}
     names = {r[0]: r[1] for r in conn.execute("select id, name from stations").fetchall()}
-    assert bench["stations"] and all(names[k] == v for k, v in bench["stations"].items())
-    assert bench["ambient"]["synthetic"] == 1.0 and bench["ambient"]["hours"] > 0  # a synthetic run says so
+    st = bench["stations"]
+    assert st and all(names[k] == v["name"] for k, v in st.items()) and sum(v["sensors"] for v in st.values()) == 50
+    assert all(v["measured"] + v["next_station"] + v["interpolated"] == v["hours"] == 168 for v in st.values())
+    assert bench["synthetic_ambient"] is True  # a synthetic run says so
     assert bench["nodes"] == []
 
 

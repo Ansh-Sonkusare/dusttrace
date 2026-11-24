@@ -346,8 +346,9 @@ def audit_sensors(conn, ward_id: str, rd: pd.DataFrame, wx: pd.DataFrame, t0: pd
     db.write_site_readings(conn, sim)
     results = [audit.score(s, sim, ambient, wx, as_of) for s in specs]
     bench = audit.benchmark(ambient, wx, as_of, centre, nodes=nodes)
+    used = measured[measured["station_id"].isin(list(bench["stations"]))]
     bench.update(as_of=as_of.isoformat(), nodes=[] if nodes is None else sorted(nodes.columns),
-                 ambient=verify_mod.input_shares(rd[rd["station_id"].isin(list(bench["stations"]))], as_of))
+                 synthetic_ambient=bool(used["synthetic"].astype(bool).any()))
     hot = {}
     if t0 - as_of <= pd.Timedelta(hours=FRESH_HOURS):  # D4 is about now; an old week says nothing about it
         by_site = {s.sensor_id: s.site_id for s in specs}

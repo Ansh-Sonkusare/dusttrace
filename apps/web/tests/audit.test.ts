@@ -40,18 +40,26 @@ describe("the audit benchmark table", () => {
 });
 
 describe("where the simulated sensors' air came from", () => {
-  const b = { n: 50, precision: 1, recall: 0.8, stations: { "openaq-12024": "Chakala-Andheri East", "openaq-6956": "Powai" } };
+  const chakala = { name: "Chakala-Andheri East", sensors: 50, hours: 168, measured: 158, next_station: 10, interpolated: 0 };
 
-  it("names the stations and how much of the scored week they measured", () => {
-    expect(ambientNote({ ...b, ambient: { hours: 336, real: 1, filled: 0, synthetic: 0 } }))
-      .toBe("Simulated sensors built from real readings at Chakala-Andheri East, Powai: all of the scored week measured.");
-    expect(ambientNote({ ...b, ambient: { hours: 336, real: 0.74, filled: 0.26, synthetic: 0 } }))
-      .toBe("Simulated sensors built from real readings at Chakala-Andheri East, Powai: 74% of the scored week measured; each hour a station missed comes from the next station that measured it.");
+  it("says plainly that all the sensors share one station, and where its missing hours came from", () => {
+    expect(ambientNote({ n: 50, precision: 1, recall: 0.8, stations: { "openaq-12024": chakala } }))
+      .toBe("All 50 simulated sensors share one station, Chakala-Andheri East, which measured 158 of the scored week's 168 hours; the other 10 came from the next station that measured them.");
+    expect(ambientNote({ n: 50, precision: 1, recall: 0.8, stations: { "openaq-12024": { ...chakala, measured: 168, next_station: 0 } } }))
+      .toBe("All 50 simulated sensors share one station, Chakala-Andheri East, which measured all 168 hours of the scored week.");
+    expect(ambientNote({ n: 50, precision: 1, recall: 0.8, stations: { "openaq-12024": { ...chakala, measured: 155, next_station: 10, interpolated: 3 } } }))
+      .toBe("All 50 simulated sensors share one station, Chakala-Andheri East, which measured 155 of the scored week's 168 hours; the other 10 came from the next station that measured them; 3 that no station measured were interpolated.");
+  });
+
+  it("lists each station when the sensors are spread over several", () => {
+    const stations = { a: { ...chakala, sensors: 30 }, b: { ...chakala, name: "Powai", sensors: 20, measured: 168, next_station: 0 } };
+    expect(ambientNote({ n: 50, precision: 1, recall: 0.8, stations }))
+      .toBe("The 50 simulated sensors are built on 2 stations: Chakala-Andheri East (30 sensors, 158 of 168 hours measured), Powai (20 sensors, 168 of 168 hours measured).");
   });
 
   it("says so when the readings were synthetic, and stays vague for an older run", () => {
-    expect(ambientNote({ ...b, ambient: { hours: 336, real: 0, filled: 0, synthetic: 1 } }))
-      .toBe("Simulated sensors built from synthetic readings at Chakala-Andheri East, Powai.");
+    expect(ambientNote({ n: 50, precision: 1, recall: 1, synthetic_ambient: true, stations: { s: chakala } }))
+      .toBe("All 50 simulated sensors are built from synthetic readings at Chakala-Andheri East.");
     expect(ambientNote({ n: 50, precision: 1, recall: 1 })).toBe("Simulated sensors built from station readings.");
   });
 });

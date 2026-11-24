@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import zlib
+from collections import Counter
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -94,6 +95,14 @@ class Ambient:
         for other in self._by_distance(lat, lon):
             pm = pm.fillna(self.pm10[other.id].reindex(ts))
         return st, pm.interpolate(limit_direction="both")
+
+    def sources(self, station: Station, ts: pd.DatetimeIndex) -> dict[str, int]:
+        """Over `ts`, where a sensor on `station` got its ambient: hours the station measured, hours only
+        another station measured (taken from it), and hours no station measured (interpolated)."""
+        own = self.pm10[station.id].reindex(ts).notna()
+        anyone = self.pm10[[s.id for s in self.stations if s.id in self.pm10]].reindex(ts).notna().any(axis=1)
+        return {"hours": len(ts), "measured": int(own.sum()), "next_station": int((~own & anyone).sum()),
+                "interpolated": int((~anyone).sum())}
 
 
 @dataclass(frozen=True)
@@ -461,7 +470,9 @@ def benchmark(ambient: Ambient, wx: pd.DataFrame, as_of: pd.Timestamp, centre: t
                "both": _rates(specs, {k: rules[k] or forest[k] for k in rules})}
     sensors = pd.Series([s.fault for s in specs]).value_counts().to_dict()
     shown = fault_shown(sim, as_of)
-    stations = {st.id: st.name for st in (ambient.nearest(*s.position) for s in specs)}
+    week = pd.date_range(end=as_of.floor("h"), periods=24 * WINDOW_DAYS, freq="h")
+    used = Counter(ambient.nearest(*s.position) for s in specs)
+    stations = {st.id: {"name": st.name, "sensors": k, **ambient.sources(st, week)} for st, k in used.items()}
     return {"n": n, **methods["rules"], "methods": methods, "sensors": {f: int(sensors.get(f, 0)) for f in FAULTS},
             "shown": {f: sum(shown[s.sensor_id] for s in specs if s.fault == f) for f in FAULTS if f != "none"},
             "imagery_active": sum(s.imagery is not None for s in specs), "stations": dict(sorted(stations.items())),

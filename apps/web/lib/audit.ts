@@ -11,10 +11,12 @@ export interface AuditBench extends Rates {
   methods?: { rules: Rates; forest: Rates; both: Rates };
   not_enough_data?: string;
   as_of?: string;
-  stations?: Record<string, string>;
-  ambient?: { hours: number; real: number; filled: number; synthetic: number };
+  stations?: Record<string, StationHours>;
+  synthetic_ambient?: boolean;
   nodes?: string[];
 }
+// A station the simulated sensors were built on, and where its sensors' ambient came from each hour.
+interface StationHours { name: string; sensors: number; hours: number; measured: number; next_station: number; interpolated: number }
 
 const METHODS = [["rules", "Rule checks"], ["forest", "Isolation Forest"], ["both", "Either"]] as const;
 const FAULTS = ["flatline", "dropout", "too_clean", "drift", "rh_bias"];
@@ -40,20 +42,23 @@ export function benchmarkTable(a: AuditBench | undefined) {
   };
 }
 
-// Where the simulated sensors' air came from: the stations they were built on and how much of the
-// scored week those stations measured. Hours a station missed come from the next station that
-// measured them, never from a model fill.
+// Where the simulated sensors' air came from: the stations they were built on and, hour by hour, whether
+// that station measured it, the next station that measured it stood in, or no station did.
 export function ambientNote(a: AuditBench): string {
-  const names = Object.values(a.stations ?? {}).join(", ");
-  const s = a.ambient;
-  if (!s || !names) return "Simulated sensors built from station readings.";
-  if (s.real === 0) return `Simulated sensors built from synthetic readings at ${names}.`;
-  if (s.real === 1) return `Simulated sensors built from real readings at ${names}: all of the scored week measured.`;
+  const st = Object.values(a.stations ?? {});
+  if (!st.length || typeof st[0] !== "object") return "Simulated sensors built from station readings.";
+  const names = st.map((x) => x.name).join(", ");
+  if (a.synthetic_ambient) return `All ${a.n} simulated sensors are built from synthetic readings at ${names}.`;
+  if (st.length > 1) {
+    return `The ${a.n} simulated sensors are built on ${st.length} stations: ${st.map((x) => `${x.name} (${x.sensors} sensors, ${x.measured} of ${x.hours} hours measured)`).join(", ")}.`;
+  }
+  const [x] = st;
+  if (x.measured === x.hours) return `All ${a.n} simulated sensors share one station, ${x.name}, which measured all ${x.hours} hours of the scored week.`;
   const rest = [
-    s.filled > 0 ? "each hour a station missed comes from the next station that measured it" : null,
-    s.synthetic > 0 ? `${pct(s.synthetic)} synthetic` : null,
+    x.next_station > 0 ? `the other ${x.next_station} came from the next station that measured them` : null,
+    x.interpolated > 0 ? `${x.interpolated} that no station measured were interpolated` : null,
   ].filter(Boolean).join("; ");
-  return `Simulated sensors built from real readings at ${names}: ${pct(s.real)} of the scored week measured${rest ? `; ${rest}` : ""}.`;
+  return `All ${a.n} simulated sensors share one station, ${x.name}, which measured ${x.measured} of the scored week's ${x.hours} hours; ${rest}.`;
 }
 
 // The calibration date the audit used, kept with the run. A date, so it's shown as stored, with no time zone shift.

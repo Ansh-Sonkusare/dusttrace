@@ -134,6 +134,16 @@ def test_hours_the_station_missed_come_from_the_next_station(env):
     assert (series[gap] == 160).all() and (series[~gap] == 40).all()
 
 
+def test_the_ambient_says_where_each_hour_came_from(env):
+    wx, _ = env
+    idx, near, far, pm = _two_stations(wx)
+    pm.loc[(idx > T0 - pd.Timedelta(hours=30)) & (idx <= T0 - pd.Timedelta(hours=18)), "near"] = np.nan  # 12 h
+    pm.loc[(idx > T0 - pd.Timedelta(hours=10)) & (idx <= T0 - pd.Timedelta(hours=7)), ["near", "far"]] = np.nan  # 3 h
+    week = pd.date_range(end=T0, periods=168, freq="h")
+    assert audit.Ambient((near, far), pm).sources(near, week) == {
+        "hours": 168, "measured": 153, "next_station": 12, "interpolated": 3}
+
+
 # ---------- neighbour check on the same wind ----------
 
 def _windy(env, from_station_share=0.4):
@@ -262,7 +272,8 @@ def test_benchmark_reports_rules_forest_and_both(bench):
     assert bench["methods"]["both"]["recall"] >= max(rules["recall"], bench["methods"]["forest"]["recall"])
     assert bench["methods"]["forest"]["detected"]["too_clean"] == 1.0
     assert bench["imagery_active"] == 26  # every other fault rotation active in imagery: both cases scored
-    assert bench["stations"] == {"s1": "Test station"}
+    assert bench["stations"] == {"s1": {"name": "Test station", "sensors": 50, "hours": 168, "measured": 168,
+                                         "next_station": 0, "interpolated": 0}}
 
 
 def test_a_humidity_fault_in_dry_air_never_shows_in_the_readings(env):
