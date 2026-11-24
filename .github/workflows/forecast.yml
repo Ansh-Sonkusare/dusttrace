@@ -1,6 +1,6 @@
 name: Hourly forecast
 
-# Ingests the latest weather and station readings, then issues a new 48 h run.
+# Ingests the latest weather and station readings, then issues a new run: 72 h of forecast, 48 h of Safe-Work Windows.
 # Needs repository secrets:
 #   DATABASE_URL     Supabase pooler connection string (Settings > Database)
 #   OPENAQ_API_KEY   free key from https://explore.openaq.org/register
