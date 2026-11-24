@@ -59,6 +59,16 @@ def test_hours_past_the_weather_forecast_are_not_forecast(year, model):
     assert forecast.predict_daily(model, rd, short, END)["day"].max() == 2  # day 3 has 12 of its 24 weather hours
 
 
+def test_training_rows_past_48_hours_come_from_every_second_origin(year):
+    rd, wx = year
+    rows = forecast.build_rows(rd, wx, None, 72, {"s1": 0, "s2": 1}, with_target=False)
+    per_h = rows.groupby("h")["t0"].nunique()
+    assert per_h[49] == pytest.approx(per_h[48] / 2, abs=1) and per_h[72] == per_h[49]
+    assert set(rows.loc[rows["h"] == 49, "t0"]) <= set(rows.loc[rows["h"] == 48, "t0"])
+    one = forecast.build_rows(rd, wx, pd.DatetimeIndex([END]), 72, {"s1": 0}, with_target=False)
+    assert sorted(one["h"]) == list(range(1, 73))  # a forecast still covers every hour
+
+
 def test_daily_target_is_the_mean_of_the_24_hours_after_the_origin(year):
     rd, wx = year
     t0 = END - pd.Timedelta(days=10)

@@ -42,6 +42,7 @@ DAILY_FEATURES = (
 )
 DAILY_OPTIONAL = ["cams_mean_24", "festival", "upwind_sites_ha"]  # averaged over the day's 24 h when the model has them
 MIN_HOURS = 18  # a 24 h mean needs 18 of its 24 hours measured
+THIN_AFTER_H = 48  # training rows past this horizon come from every second origin, so 72 h costs about 1.25x 48 h
 UPWIND_RADIUS_M = 3000
 UPWIND_HALF_WIDTH = 30  # degrees either side of the direction the wind blows from
 IST = 5.5
@@ -112,10 +113,12 @@ def build_rows(readings: pd.DataFrame, wx: pd.DataFrame, origins: pd.DatetimeInd
         t0s = origins if origins is not None else idx[24:-1:origin_stride]
         base = _origin_features(pm, t0s)
         for h in range(1, horizon + 1):
-            tgt = t0s + pd.Timedelta(hours=h)
-            df = base.copy()
+            thin = origins is None and h > THIN_AFTER_H
+            at = t0s[::2] if thin else t0s
+            tgt = at + pd.Timedelta(hours=h)
+            df = base.iloc[::2].copy() if thin else base.copy()
             df["h"] = h
-            df["t0"] = t0s
+            df["t0"] = at
             df["ts"] = tgt
             df["station_id"] = sid
             df["station_code"] = code
