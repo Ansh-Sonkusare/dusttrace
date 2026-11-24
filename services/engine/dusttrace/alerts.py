@@ -49,11 +49,12 @@ def derive(states: list[SiteState]) -> list[Alert]:
         if d is None:
             continue
         name = site_label(c.site_id, c.name)
-        if "forecast_spike" in d.triggers and not c.has_relay and not s.plan_accepted:
+        final = {a.action for a in d.final}  # under D10 nothing is asked of the site, so no alert asks it either
+        if "SCHEDULE_MIST" in final and "forecast_spike" in d.triggers and not c.has_relay and not s.plan_accepted:
             out.append(Alert("critical", c.site_id, s.case_id,
                              f"{name}: spike from {_ist(min(c.spike_hours))} and no misting arranged",
                              "Call the site manager to accept the plan and start misting 90 min before."))
-        if c.sensor_hot_hours and s.avoid_now:
+        if "TRIGGER_MIST_NOW" in final and c.sensor_hot_hours and s.avoid_now:
             out.append(Alert("action", c.site_id, s.case_id,
                              f"{name}: dusty work inside an Avoid window",
                              "Manager alerted to pause dusty work"

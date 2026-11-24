@@ -72,3 +72,38 @@ def test_implausible_pairs_are_ignored():
     # Seen in real CPCB data on Sep 1: PM10 180 with PM2.5 near zero is a broken PM2.5 channel, not dust.
     assert signature.classify(180, 1.8, base_pm10=60, base_ratio=0.22, ts=day) is None
     assert signature.classify(150, 160, base_pm10=60, base_ratio=0.4, ts=day) is None  # PM2.5 can't exceed PM10
+
+
+# D10 (issue #56): what carried the exceedances a site is blamed for.
+def _hours(day, ratio, n=2, station="s1"):
+    ts = pd.Timestamp(f"{day} 06:00", tz="UTC")  # 11:30 IST
+    return [{"station_id": station, "ts": ts + pd.Timedelta(hours=i), "pm10": 150.0, "pm25": 150.0 * ratio}
+            for i in range(n)]
+
+
+BASE = {"s1": (60.0, 0.4)}
+
+
+def test_each_exceedance_day_is_read_from_its_pm25_share_against_the_station_baseline():
+    days = {"2026-10-01": _hours("2026-10-01", 0.6), "2026-10-02": _hours("2026-10-02", 0.2),
+            "2026-10-03": _hours("2026-10-03", 0.4), "2026-10-04": _hours("2026-10-04", 0.6, station="s9")}
+    assert signature.day_causes(days, BASE) == {"2026-10-01": "fine", "2026-10-02": "coarse",
+                                                "2026-10-03": None, "2026-10-04": None}  # mixed; no baseline
+
+
+def test_non_construction_needs_most_days_and_at_least_two_carried_by_pm25():
+    assert signature.non_construction({"a": "fine", "b": "fine", "c": "coarse"})
+    assert signature.non_construction({"a": "fine", "b": "fine"})
+    assert not signature.non_construction({"a": "fine"})                        # one day can be a one-off fire
+    assert not signature.non_construction({"a": "fine", "b": "fine", "c": None, "d": "coarse"})  # not most days
+    assert not signature.non_construction({"a": None, "b": None, "c": None})    # no PM2.5 evidence: nothing assumed
+    assert not signature.non_construction({})
+
+
+def test_baselines_use_only_measured_hours_before_the_start():
+    rd = _station("s1", hours=24 * 40)
+    rd.loc[rd.index[-24:], ["pm10", "pm25"]] = [300.0, 280.0]  # after the start: invisible
+    b = signature.baselines(rd, T0 - pd.Timedelta(hours=24))
+    assert b["s1"][0] == pytest.approx(60, abs=2) and b["s1"][1] == pytest.approx(0.4, abs=0.01)
+    syn = rd.assign(synthetic=True)
+    assert signature.baselines(syn, T0) == {}

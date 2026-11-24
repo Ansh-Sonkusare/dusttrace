@@ -23,6 +23,8 @@ python -m dusttrace --ward K-East node-add --id node-marol-school --name "Marol 
 
 The command prints the key once. Paste it into `NODE_KEY` in the sketch. Running `node-add` again for the same id rotates the key, and the old key stops working.
 
+A node at a construction site's gate takes `--host-kind site_gate --site <site id>`. Its readings are the evidence that a site ignored a Safe-Work Window (D8): an Avoid hour of a plan the manager accepted, in which the gate node read PM10 above twice the ambient. Without a gate node, no window is ever counted as ignored.
+
 ## API
 
 `POST /api/node`, header `Authorization: Bearer <key>`, JSON body:

@@ -197,3 +197,104 @@ def test_a_node_at_the_receptor_is_a_second_signal_that_unlocks_enforcement():
     d = agent.decide(ctx(**base, receptor_node_hot=True))
     assert "receptor monitor" in d.signals
     assert "ADD_TO_INSPECTION" in actions(d) and "REQUEST_SPOT_CHECK" not in actions(d)
+
+
+# Issue #56: D8, D9 and D10 on measured evidence, the PRD's other triggers, and closing with no action.
+DAYS = [{"date": f"2026-11-{d:02d}", "station": "Chakala", "ts": NOW - pd.Timedelta(days=12 - d), "pm10": 140.0 + d,
+         "pm25": 50.0, "background": 60.0, "added": 22.0, "shared_with": d % 2, "wind_dir": 250, "wind_speed": 2.1,
+         "hours": [{}, {}], "cause": c}
+        for d, c in ((7, "coarse"), (8, None), (10, "coarse"))]
+
+
+def test_d8_notice_cites_the_measured_station_hours_and_winds_behind_it():
+    d = agent.decide(ctx(exceedances_7d=3, exceedance_days=DAYS, citizen_reports=1))
+    n = actions(d)["ISSUE_NOTICE"]
+    assert (n.route, n.rule, n.status) == ("L1", "D8", "proposed") and d.state == "APPROVAL_ROUTING"
+    assert "3 days" in n.reason and "Chakala" in n.reason and "147 µg/m³" in n.reason and "250°" in n.reason
+    assert "against 60 µg/m³ at the other stations" in n.reason and "about 22 µg/m³ from this site's plume" in n.reason
+    assert "(2 hours)" in n.reason and "shared with 1 other site" in n.reason
+
+
+def test_d1_the_plume_model_and_station_attribution_are_one_line_of_evidence():
+    # Both only say the wind put the site upwind; neither shows it was working. No notice on that alone.
+    d = agent.decide(ctx(exceedances_7d=3, exceedance_days=DAYS, spike_hours=SPIKE, spike_receptors=["School"]))
+    assert {"plume model", "station attribution"} <= set(d.signals)
+    acts = actions(d)
+    assert "ISSUE_NOTICE" not in acts and "REQUEST_SITE_PHOTO" in acts
+    assert "ISSUE_NOTICE" in actions(agent.decide(ctx(exceedances_7d=3, satellite_active=True)))
+
+
+def test_d8_two_ignored_windows_with_a_second_signal_issue_a_notice():
+    acts = actions(agent.decide(ctx(ignored_windows=2, satellite_active=True)))
+    assert acts["ISSUE_NOTICE"].rule == "D8" and "2 ignored Safe-Work Windows" in acts["ISSUE_NOTICE"].reason
+    assert "ISSUE_NOTICE" not in actions(agent.decide(ctx(ignored_windows=1, satellite_active=True)))
+
+
+def test_d9_needs_an_officer_confirmed_violation_d8_and_receptor_exposure():
+    full = dict(exceedances_7d=3, confirmed_violation=True, sensitive_avoid=[(SPIKE[0], "Nanavati Hospital")])
+    stop = actions(agent.decide(ctx(**full)))["RECOMMEND_STOP_WORK"]
+    assert (stop.route, stop.rule, stop.status) == ("L2", "D9", "proposed")
+    for missing in ({"exceedances_7d": 2}, {"confirmed_violation": False, "citizen_reports": 1}, {"sensitive_avoid": []}):
+        assert "RECOMMEND_STOP_WORK" not in actions(agent.decide(ctx(**{**full, **missing}))), missing
+
+
+def test_d9_counts_a_node_reading_at_a_receptor_as_exposure():
+    d = agent.decide(ctx(exceedances_7d=3, confirmed_violation=True, receptor_node_hot=True))
+    assert actions(d)["RECOMMEND_STOP_WORK"].route == "L2"
+
+
+def test_d10_drops_the_notice_and_every_site_action_and_refers_with_the_evidence():
+    fine = [{**x, "cause": "fine"} for x in DAYS]
+    d = agent.decide(ctx(exceedances_7d=3, exceedance_days=fine, citizen_reports=1, confirmed_violation=True,
+                         sensitive_avoid=[(SPIKE[0], "School")], spike_hours=SPIKE, spike_receptors=["School"],
+                         non_construction=True))
+    acts = actions(d)
+    assert "ISSUE_NOTICE" in actions(d, "initial")  # what D8 alone would have done
+    assert not {"ISSUE_NOTICE", "RECOMMEND_STOP_WORK", "ADD_TO_INSPECTION"} & set(acts)
+    assert not {a.action for a in d.final} & agent.SITE_ACTIONS
+    ref = acts["REFER_NON_CONSTRUCTION"]
+    assert (ref.route, ref.rule, ref.status) == ("L1", "D10", "proposed") and "PM2.5" in ref.reason and "Chakala" in ref.reason
+
+
+def test_d10_after_the_referral_is_approved_the_case_closes_with_no_action():
+    d = agent.decide(ctx(exceedances_7d=3, citizen_reports=1, non_construction=True, referred=True))
+    acts = actions(d)
+    close = acts["CLOSE_NO_ACTION"]
+    assert (close.route, close.rule, close.status, close.type) == ("auto", "D10", "done", "close")
+    assert "REFER_NON_CONSTRUCTION" not in acts and d.state == "DONE"
+    # anything still open for an officer keeps the case open
+    overdue = [{"action": "REQUEST_SITE_PHOTO", "deadline": NOW - pd.Timedelta(hours=1)}]
+    d = agent.decide(ctx(exceedances_7d=3, non_construction=True, referred=True, pending_requests=overdue))
+    assert "CLOSE_NO_ACTION" not in actions(d) and d.state != "DONE"
+
+
+def test_a_node_reading_at_a_school_or_hospital_and_a_satellite_find_are_triggers():
+    assert "node_at_school_or_hospital" in agent.decide(ctx(sensitive_node_hot=True, receptor_node_hot=True)).triggers
+    assert agent.decide(ctx(receptor_node_hot=True)) is None  # a node at homes is evidence, not a trigger
+    assert "satellite_find" in agent.decide(ctx(satellite_active=True)).triggers
+
+
+def test_d1_a_trigger_on_one_signal_still_gets_no_enforcement():
+    for one in ({"satellite_active": True}, {"exceedances_7d": 5}, {"sensitive_node_hot": True, "receptor_node_hot": True}):
+        d = agent.decide(ctx(site_id="osm-way-1", has_sensor=False, sensor_known=False, has_relay=False, trust=None, **one))
+        assert not {a.action for a in d.final} & agent.ENFORCEMENT_FROM_CAUSE, one
+
+
+def test_d1_a_node_at_a_receptor_does_not_make_station_attribution_a_second_cause():
+    # The node shows dust reached the school; only the wind and the plume tie it to this site, the same tie
+    # station attribution rests on. That still earns an inspection, never a notice or a stop-work.
+    d = agent.decide(ctx(exceedances_7d=3, exceedance_days=DAYS, receptor_node_hot=True, confirmed_violation=False))
+    acts = actions(d)
+    assert "ISSUE_NOTICE" not in acts and "RECOMMEND_STOP_WORK" not in acts
+    assert "ISSUE_NOTICE" in actions(agent.decide(ctx(exceedances_7d=3, receptor_node_hot=True, satellite_active=True)))
+
+
+def test_d1_a_missing_monitor_says_nothing_about_what_caused_the_dust():
+    # Demo site D has no monitor ("site registry"). That supports registering it (D6), not a notice (D8).
+    d = agent.decide(ctx(site_id="D", has_sensor=False, has_relay=False, trust=None, exceedances_7d=3, exceedance_days=DAYS))
+    acts = actions(d)
+    assert "site registry" in d.signals and "ISSUE_NOTICE" not in acts and "REQUEST_SPOT_CHECK" in acts
+    assert acts["REGISTER_UNSENSORED_SITE"].rule == "D6"
+    assert "station attribution" in acts["REQUEST_SPOT_CHECK"].reason
+    d = agent.decide(ctx(site_id="D", has_sensor=False, has_relay=False, trust=None, exceedances_7d=3, citizen_reports=1))
+    assert "ISSUE_NOTICE" in actions(d)
