@@ -61,6 +61,23 @@ export function ambientNote(a: AuditBench): string {
   return `All ${a.n} simulated sensors share one station, ${x.name}, which measured ${x.measured} of the scored week's ${x.hours} hours; ${rest}.`;
 }
 
+// What the table can't show by itself: a fault that never changed a reading this week (nothing to find),
+// and one that changed readings yet no method caught. Follows each run's numbers, ward by ward.
+export function faultNotes(a: AuditBench): string[] {
+  const rows = a.methods ? [a.methods.rules, a.methods.forest, a.methods.both] : [a];
+  return FAULTS.flatMap((f) => {
+    const n = a.sensors?.[f], shown = a.shown?.[f];
+    if (n == null || shown == null || n === 0) return [];
+    const label = sentence(FAULT_LABEL[f] ?? f);
+    if (shown === 0) return [`${label} never changed a reading this week, so no method could find it.`];
+    if (Math.max(...rows.map((r) => r.detected?.[f] ?? 0)) === 0) {
+      return [`${label} changed ${shown === n ? `all ${n}` : `${shown} of ${n}`} sensors' readings, and no method caught any of them.`];
+    }
+    if (shown < n) return [`${label} never changed ${n - shown} of its ${n} sensors' readings this week.`];
+    return [];
+  });
+}
+
 // The calibration date the audit used, kept with the run. A date, so it's shown as stored, with no time zone shift.
 export function calibrationNote(a: { calibrated_on: string | null; simulated: boolean }): string {
   if (!a.calibrated_on) return "No calibration date on record.";

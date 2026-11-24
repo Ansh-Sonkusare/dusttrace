@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ambientNote, benchmarkTable, calibrationNote } from "../lib/audit";
+import { ambientNote, benchmarkTable, calibrationNote, faultNotes } from "../lib/audit";
 
 const rates = (p: number, r: number, d: Record<string, number>) => ({ precision: p, recall: r, detected: d });
 
@@ -61,6 +61,24 @@ describe("where the simulated sensors' air came from", () => {
     expect(ambientNote({ n: 50, precision: 1, recall: 1, synthetic_ambient: true, stations: { s: chakala } }))
       .toBe("All 50 simulated sensors are built from synthetic readings at Chakala-Andheri East.");
     expect(ambientNote({ n: 50, precision: 1, recall: 1 })).toBe("Simulated sensors built from station readings.");
+  });
+});
+
+describe("what the fault table can and can't show", () => {
+  const rates = (rh: number) => ({ precision: 1, recall: 0.8, detected: { none: 0, flatline: 1, rh_bias: rh } });
+  const bench = (shown: number, rh = 0) => ({
+    n: 50, precision: 1, recall: 0.8, sensors: { flatline: 9, rh_bias: 8 }, shown: { flatline: 9, rh_bias: shown },
+    methods: { rules: rates(rh), forest: rates(rh), both: rates(rh) },
+  });
+
+  it("says a fault that never changed a reading couldn't be found (a dry week)", () => {
+    expect(faultNotes(bench(0))).toEqual(["Humidity over-reading never changed a reading this week, so no method could find it."]);
+  });
+
+  it("says a fault that changed the readings was still missed", () => {
+    expect(faultNotes(bench(8))).toEqual(["Humidity over-reading changed all 8 sensors' readings, and no method caught any of them."]);
+    expect(faultNotes(bench(5, 0.5))).toEqual(["Humidity over-reading never changed 3 of its 8 sensors' readings this week."]);
+    expect(faultNotes(bench(8, 1))).toEqual([]);
   });
 });
 
