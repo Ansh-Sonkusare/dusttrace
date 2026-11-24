@@ -55,7 +55,7 @@ export default async function SitesPage() {
           <div className="pb">
             {!table ? <p className="small muted">Not enough data: this run had no measured station readings in the audit window, so no sensors were simulated or scored.</p> : (
               <>
-                <p className="small muted">{ambientNote(bench!)} {bench!.n} simulated site sensors, each built on its nearest station&apos;s measured PM10 and the weather over the week to {bench!.as_of ? dayShort(bench!.as_of) : "this run"}, with one known fault injected in rotation; half their sites count as active in Sentinel-2 imagery. The share of each fault&apos;s sensors that each method flags. Only the rule checks set the trust score; the Isolation Forest is shown for comparison, because it also flags healthy sensors that sit in their own site&apos;s plume.</p>
+                <p className="small muted">{ambientNote(bench!)} {bench!.n} simulated site sensors, each built on its nearest station&apos;s measured PM10 and the weather over the week to {bench!.as_of ? dayShort(bench!.as_of) : "this run"}, with one known fault injected in rotation; half their sites count as active in Sentinel-2 imagery. The share of each fault&apos;s sensors that each method flags; a fault changed the readings when it moved at least 6 hours of the week by more than 5%. Only the rule checks set the trust score; the Isolation Forest is shown for comparison, because it also flags healthy sensors that sit in their own site&apos;s plume.</p>
                 <div style={{ overflowX: "auto" }}>
                   <table className="tbl">
                     <thead><tr><th>Injected fault</th><th>Sensors</th><th>Changed the readings</th>{table.methods.map((m) => <th key={m.key}>{m.label}</th>)}</tr></thead>

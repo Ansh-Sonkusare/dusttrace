@@ -61,19 +61,20 @@ export function ambientNote(a: AuditBench): string {
   return `All ${a.n} simulated sensors share one station, ${x.name}, which measured ${x.measured} of the scored week's ${x.hours} hours; ${rest}.`;
 }
 
-// What the table can't show by itself: a fault that never changed a reading this week (nothing to find),
-// and one that changed readings yet no method caught. Follows each run's numbers, ward by ward.
+// What the table can't show by itself: a fault that barely moved the readings this week (nothing to find),
+// and one that changed readings yet no method caught. A fault "changed the readings" when it moved at
+// least 6 of the week's hours by more than 5% (the engine's fault_shown). Follows each run, ward by ward.
 export function faultNotes(a: AuditBench): string[] {
   const rows = a.methods ? [a.methods.rules, a.methods.forest, a.methods.both] : [a];
   return FAULTS.flatMap((f) => {
     const n = a.sensors?.[f], shown = a.shown?.[f];
     if (n == null || shown == null || n === 0) return [];
     const label = sentence(FAULT_LABEL[f] ?? f);
-    if (shown === 0) return [`${label} never changed a reading this week, so no method could find it.`];
+    if (shown === 0) return [`${label} moved no sensor's readings by more than 5% for 6 hours or more this week, so no method could be expected to find it.`];
     if (Math.max(...rows.map((r) => r.detected?.[f] ?? 0)) === 0) {
       return [`${label} changed ${shown === n ? `all ${n}` : `${shown} of ${n}`} sensors' readings, and no method caught any of them.`];
     }
-    if (shown < n) return [`${label} never changed ${n - shown} of its ${n} sensors' readings this week.`];
+    if (shown < n) return [`${label} moved ${n - shown} of its ${n} sensors' readings by more than 5% for fewer than 6 hours this week.`];
     return [];
   });
 }

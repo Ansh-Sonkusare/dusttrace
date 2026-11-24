@@ -71,13 +71,13 @@ describe("what the fault table can and can't show", () => {
     methods: { rules: rates(rh), forest: rates(rh), both: rates(rh) },
   });
 
-  it("says a fault that never changed a reading couldn't be found (a dry week)", () => {
-    expect(faultNotes(bench(0))).toEqual(["Humidity over-reading never changed a reading this week, so no method could find it."]);
+  it("says a fault that barely moved the readings left nothing to find (a dry week)", () => {
+    expect(faultNotes(bench(0))).toEqual(["Humidity over-reading moved no sensor's readings by more than 5% for 6 hours or more this week, so no method could be expected to find it."]);
   });
 
   it("says a fault that changed the readings was still missed", () => {
     expect(faultNotes(bench(8))).toEqual(["Humidity over-reading changed all 8 sensors' readings, and no method caught any of them."]);
-    expect(faultNotes(bench(5, 0.5))).toEqual(["Humidity over-reading never changed 3 of its 8 sensors' readings this week."]);
+    expect(faultNotes(bench(5, 0.5))).toEqual(["Humidity over-reading moved 3 of its 8 sensors' readings by more than 5% for fewer than 6 hours this week."]);
     expect(faultNotes(bench(8, 1))).toEqual([]);
   });
 });
