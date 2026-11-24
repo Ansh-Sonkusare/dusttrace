@@ -63,3 +63,9 @@ def test_real_sites_are_named_not_shown_by_their_long_id():
     assert rec.title.startswith("Marol Maternity Home downwind of Metro Casting Yard from")
     assert "osm-way" not in rec.title and rec.site_id == "osm-way-554967617"
     assert alerts.site_label("A", "Metro Line 7A excavation") == "A · Metro Line 7A excavation"
+
+
+def test_no_site_alert_for_a_case_referred_under_d10():
+    s = case(has_relay=False, sensor_hot_hours=1, spike_hours=SPIKE, spike_receptors=["School"], non_construction=True)
+    s.avoid_now = True
+    assert not {"critical", "action"} & kinds(alerts.derive([s]))  # nothing is asked of the site

@@ -66,6 +66,7 @@ export const ACTION_LABEL: Record<string, string> = {
   RECOMMEND_STOP_WORK: "Recommend stop-work",
   REFER_NON_CONSTRUCTION: "Refer to MPCB or BMC",
   UPDATE_DUST_SCORE: "Update the Dust Score",
+  CLOSE_NO_ACTION: "Close with no action at the site",
 };
 
 export const CAUSE_LABEL: Record<string, string> = {
