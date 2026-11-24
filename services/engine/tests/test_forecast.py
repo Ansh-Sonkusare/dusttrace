@@ -142,7 +142,8 @@ def test_backtest_scores_49_to_72_hours_and_the_daily_calls(year):
     res = backtest.run(rd, wx, start, END, horizon=72, step_h=24)
     assert res.origins == 4 and set(res.metrics) == {"1-24", "25-48", "49-72"}
     assert res.metrics["49-72"]["n"] > 0 and res.metrics["49-72"]["mae_persistence"] > 0
-    assert set(res.daily) == {"ward", "stations"}
+    assert set(res.daily) == {"ward", "stations", "window"}
+    assert res.daily["window"]["ward_days"] == 4 + 2  # days 1-3 of four daily forecasts span six days
     for level, n in (("ward", 4), ("stations", 8)):
         assert set(res.daily[level]) == {"1", "2", "3"}
         for m in res.daily[level].values():
@@ -152,13 +153,30 @@ def test_backtest_scores_49_to_72_hours_and_the_daily_calls(year):
 
 def test_daily_metrics_on_a_toy_series():
     rows = pd.DataFrame({
-        "level": ["ward"] * 4, "day": [1, 1, 1, 1],
+        "level": ["ward"] * 4, "station_id": ["ward"] * 4, "day": [1, 1, 1, 1],
+        "end": pd.date_range("2026-11-02", periods=4, freq="D", tz="UTC"),
         "p": [0.9, 0.2, 0.7, 0.1], "actual": [130.0, 110.0, 80.0, 60.0], "persist": [120.0, 90.0, 70.0, 50.0],
     })
     m = backtest.daily_metrics(rows, 100.0)["ward"]["1"]
     assert (m["n"], m["exceed_days"], m["hits"], m["misses"], m["false_alarms"]) == (4, 2, 1, 1, 1)
     assert m["f1_model"] == pytest.approx(0.5) and m["f1_persistence"] == pytest.approx(2 / 3, abs=1e-3)
     assert m["brier"] == pytest.approx((0.01 + 0.64 + 0.49 + 0.01) / 4, abs=1e-3)
+
+
+def test_each_measured_day_counts_once_and_a_quiet_window_has_no_f1():
+    e1, e2 = pd.Timestamp("2026-11-02T00:00Z"), pd.Timestamp("2026-11-03T00:00Z")
+    rows = pd.DataFrame({  # two forecasts score the 24 h ending e2: the first as day 2, the second as day 1
+        "level": ["ward", "ward", "ward", "stations", "stations"], "station_id": ["ward", "ward", "ward", "s1", "s1"],
+        "day": [1, 2, 1, 1, 2], "end": [e1, e2, e2, e1, e2],
+        "p": [0.8, 0.3, 0.2, 0.3, 0.1], "actual": [130.0, 60.0, 60.0, 40.0, 45.0], "persist": [90.0, 80.0, 130.0, 50.0, 50.0],
+    })
+    m = backtest.daily_metrics(rows, 100.0)
+    assert m["window"] == {"ward_days": 2, "ward_exceed_days": 1, "station_days": 2, "station_exceed_days": 0}
+    assert m["stations"]["1"]["f1_model"] is None and m["stations"]["1"]["f1_persistence"] is None  # nothing to catch
+    assert m["ward"]["1"]["f1_persistence"] == 0  # a false alarm against one exceedance is a real 0
+    quiet = pd.DataFrame({"h": [1, 2], "pred": [50.0, 60.0], "lo": [40.0, 50.0], "hi": [60.0, 70.0], "p": [0.1, 0.2],
+                          "actual": [55.0, 58.0], "persist": [52.0, 52.0]})
+    assert backtest.metrics(quiet, 100.0)["1-24"]["f1_exceed_model"] is None
 
 
 def test_an_input_stays_on_only_if_it_does_not_make_the_backtest_worse():
@@ -170,3 +188,20 @@ def test_an_input_stays_on_only_if_it_does_not_make_the_backtest_worse():
     assert c == {"mae": -0.5, "f1_hourly": 0.0, "f1_daily": 0.0, "on": True}
     assert backtest.change(hourly, daily, better, worse_f1)["on"] is False
     assert backtest.change(hourly, daily, hourly, daily)["on"] is True  # no change is not worse
+
+
+def test_a_change_too_small_to_show_still_decides():
+    # Real K-East, Sep-Oct window: festival cut the error but lost 0.0003 of hourly F1, which rounds to 0.000.
+    daily = {"stations": {d: {"f1_model": 0.9} for d in ("1", "2", "3")}}
+    base = {k: {"mae_model": 20.0, "f1_exceed_model": f} for k, f in (("1-24", 0.915), ("25-48", 0.912), ("49-72", 0.912))}
+    fest = {k: {"mae_model": 19.7, "f1_exceed_model": f} for k, f in (("1-24", 0.915), ("25-48", 0.911), ("49-72", 0.912))}
+    c = backtest.change(base, daily, fest, daily)
+    assert c["on"] is False and c["f1_hourly"] == pytest.approx(-0.0003, abs=1e-4)
+
+
+def test_a_quiet_window_compares_false_alarms_against_nothing_to_catch():
+    hourly = {k: {"mae_model": 10.0, "f1_exceed_model": None} for k in ("1-24", "25-48", "49-72")}
+    quiet = {"stations": {d: {"f1_model": None} for d in ("1", "2", "3")}}
+    alarms = {"stations": {"1": {"f1_model": 0.0}, "2": {"f1_model": None}, "3": {"f1_model": None}}}
+    assert backtest.change(hourly, quiet, hourly, quiet)["on"] is True
+    assert backtest.change(hourly, quiet, hourly, alarms)["on"] is False

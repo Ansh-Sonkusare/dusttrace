@@ -50,16 +50,26 @@ def metrics(rows: pd.DataFrame, threshold: float) -> dict:
             "n": int(len(r)),
             "mae_model": round(float((r["pred"] - r["actual"]).abs().mean()), 2),
             "mae_persistence": round(float((r["persist"] - r["actual"]).abs().mean()), 2),
-            "f1_exceed_model": round(float(f1_score(ex, r["p"] >= 0.5, zero_division=0)), 3),
-            "f1_exceed_persistence": round(float(f1_score(ex, r["persist"] > threshold, zero_division=0)), 3),
+            "f1_exceed_model": _f1(ex, r["p"] >= 0.5),
+            "f1_exceed_persistence": _f1(ex, r["persist"] > threshold),
             "coverage_10_90": round(float(((r["actual"] >= r["lo"]) & (r["actual"] <= r["hi"])).mean()), 3),
             "exceed_rate": round(float(ex.mean()), 3),
         }
     return out
 
 
+def _f1(truth, call) -> float | None:
+    """F1, or None when nothing was measured above the threshold and nothing was called."""
+    truth, call = np.asarray(truth, dtype=bool), np.asarray(call, dtype=bool)
+    if not truth.any() and not call.any():
+        return None
+    return round(float(f1_score(truth, call, zero_division=0)), 3)
+
+
 def daily_metrics(rows: pd.DataFrame, threshold: float) -> dict:
-    """`rows`: level ('ward' or 'stations'), day, p, actual and persist (24 h means), one per series and day."""
+    """`rows`: level ('ward' or 'stations'), station_id, day, end (the day's last hour), p, actual and persist
+    (24 h means). `window` counts each measured 24 h once, though days 1-3 of successive forecasts score it
+    up to three times."""
     out = {}
     for level, g in rows.groupby("level"):
         out[level] = {}
@@ -71,25 +81,32 @@ def daily_metrics(rows: pd.DataFrame, threshold: float) -> dict:
                 "hits": int((ex & call).sum()),
                 "misses": int((ex & ~call).sum()),
                 "false_alarms": int((~ex & call).sum()),
-                "f1_model": round(float(f1_score(ex, call, zero_division=0)), 3),
-                "f1_persistence": round(float(f1_score(ex, r["persist"] > threshold, zero_division=0)), 3),
+                "f1_model": _f1(ex, call),
+                "f1_persistence": _f1(ex, r["persist"] > threshold),
                 "brier": round(float(((r["p"] - ex) ** 2).mean()), 4),
             }
+    seen = rows.drop_duplicates(["station_id", "end"])
+    w, s = seen[seen["level"] == "ward"], seen[seen["level"] == "stations"]
+    out["window"] = {"ward_days": int(len(w)), "ward_exceed_days": int((w["actual"] > threshold).sum()),
+                     "station_days": int(len(s)), "station_exceed_days": int((s["actual"] > threshold).sum())}
     return out
 
 
 def change(base_hourly: dict, base_daily: dict, hourly: dict, daily: dict) -> dict:
     """What adding an input did to the back-test, and whether it stays on: only if the hourly MAE does not
-    rise and neither the hourly nor the daily exceedance F1 falls (each the mean over its horizons)."""
+    rise and neither the hourly nor the daily exceedance F1 falls (each the mean over its horizons). The
+    decision uses the unrounded means; a blank F1 (nothing to catch, nothing called) counts as perfect, so
+    false alarms in a quiet window count against the input."""
     def summary(h, d):
         mean = lambda xs: float(np.mean(xs)) if xs else 0.0
+        f1 = lambda v: 1.0 if v is None else v
         return (mean([h[k]["mae_model"] for k in BUCKETS if k in h]),
-                mean([h[k]["f1_exceed_model"] for k in BUCKETS if k in h]),
-                mean([v["f1_model"] for v in d.get("stations", {}).values()]))
+                mean([f1(h[k]["f1_exceed_model"]) for k in BUCKETS if k in h]),
+                mean([f1(v["f1_model"]) for v in d.get("stations", {}).values()]))
     (m0, h0, d0), (m1, h1, d1) = summary(base_hourly, base_daily), summary(hourly, daily)
-    out = {"mae": round(m1 - m0, 2), "f1_hourly": round(h1 - h0, 3), "f1_daily": round(d1 - d0, 3)}
-    out["on"] = out["mae"] <= 0 and out["f1_hourly"] >= 0 and out["f1_daily"] >= 0
-    return out
+    tol = 1e-9  # float noise only
+    return {"mae": round(m1 - m0, 4), "f1_hourly": round(h1 - h0, 4), "f1_daily": round(d1 - d0, 4),
+            "on": m1 - m0 <= tol and h1 - h0 >= -tol and d1 - d0 >= -tol}
 
 
 def _ward_actual(readings: pd.DataFrame) -> pd.Series:
@@ -128,7 +145,8 @@ def run(readings: pd.DataFrame, wx: pd.DataFrame, start: pd.Timestamp, end: pd.T
                              "actual": actual[ts], "persist": actual[t0]})
         for d in forecast.predict_daily(model, seen, wx, t0, cams=cams).itertuples():
             m = means[d.station_id]
-            drows.append({"level": "ward" if d.station_id == "ward" else "stations", "day": d.day, "p": d.p_exceed,
+            drows.append({"level": "ward" if d.station_id == "ward" else "stations", "station_id": d.station_id,
+                          "day": d.day, "end": d.ends_at, "p": d.p_exceed,
                           "actual": m.get(d.ends_at, np.nan), "persist": m.get(t0, np.nan)})
     df = pd.DataFrame(rows)
     ddf = pd.DataFrame(drows).dropna(subset=["actual", "persist"]) if drows else pd.DataFrame()

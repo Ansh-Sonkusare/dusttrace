@@ -248,7 +248,7 @@ def test_backtest_scores_49_to_72_hours_and_the_daily_calls(conn, settings):
     pipeline.ingest(conn, settings, mode="synthetic", days=90)
     out = pipeline.backtest(conn, settings, days=10)
     m, daily, note = one(conn, "select metrics, daily, note from backtests where id=%s", (out["id"],))
-    assert set(m) == {"1-24", "25-48", "49-72"} and set(daily) == {"ward", "stations"}
+    assert set(m) == {"1-24", "25-48", "49-72"} and set(daily) == {"ward", "stations", "window"}
     assert set(daily["ward"]) == {"1", "2", "3"} and daily["ward"]["3"]["n"] == out["origins"]
     assert "exceed_days" in daily["stations"]["1"] and "Inputs as in runs" in note
 
