@@ -221,7 +221,8 @@ def write_forecasts(conn, run_id: int, df: pd.DataFrame) -> None:
         )
 
 
-def write_site_hours(conn, run_id: int, hours) -> None:
+def write_site_hours(conn, run_id: int, hours, plans: dict) -> None:
+    """Plumes, exposures and Safe-Work Windows, with where each Avoid hour's work moves (`exposure.plan`)."""
     with conn.cursor() as cur:
         plumes, exps, wins = [], [], []
         for sh in hours:
@@ -230,7 +231,11 @@ def write_site_hours(conn, run_id: int, hours) -> None:
             plumes.append((run_id, sh.site_id, ts, gj, sh.max_conc, sh.length_m))
             for rid, c in sh.exposures:
                 exps.append((run_id, sh.site_id, rid, ts, c))
-            wins.append((run_id, sh.site_id, ts, sh.status, sh.exposed_people, sh.sensitive_hit, sh.reason))
+            to, gain, gain_15 = plans[sh.site_id].moves.get(sh.ts, (None, 0.0, 0.0))
+            wins.append((run_id, sh.site_id, ts, sh.status, sh.exposed_people, sh.sensitive_hit, sh.reason,
+                         round(sh.person_exposure, 1), round(sh.person_exposure_15, 1),  # real can't hold 1e-60
+                         to.to_pydatetime() if to is not None else None, round(gain, 1), round(gain_15, 1),
+                         round(sh.person_exposure_ward, 1)))
         cur.executemany(
             """insert into plumes (run_id, site_id, ts, geom, max_conc, length_m)
                values (%s,%s,%s, case when %s::text is null then null
@@ -239,8 +244,20 @@ def write_site_hours(conn, run_id: int, hours) -> None:
         )
         cur.executemany("insert into exposures (run_id, site_id, receptor_id, ts, conc) values (%s,%s,%s,%s,%s)", exps)
         cur.executemany(
-            """insert into safe_windows (run_id, site_id, ts, status, exposed_people, sensitive_hit, reason)
-               values (%s,%s,%s,%s,%s,%s,%s)""", wins)
+            """insert into safe_windows (run_id, site_id, ts, status, exposed_people, sensitive_hit, reason,
+               person_exposure, person_exposure_15, move_to, avoided, avoided_15, person_exposure_ward)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", wins)
+
+
+def write_exposure_avoided(conn, run_id: int, plans: dict) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            """insert into exposure_avoided (run_id, site_id, without_plan, with_plan, avoided, avoided_pct,
+               without_15, with_15, avoided_15, avoided_15_pct, moved_hours, stuck_hours, without_ward, avoided_ward)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            [(run_id, sid, p.without, p.with_plan, p.avoided, p.pct, p.without_15, p.with_15, p.avoided_15, p.pct_15,
+              len(p.moves), len(p.stuck), p.without_ward, p.avoided_ward) for sid, p in plans.items()],
+        )
 
 
 def _f(v):
