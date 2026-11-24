@@ -349,12 +349,15 @@ def score(spec: SensorSpec, readings: pd.DataFrame, ambient: Ambient, wx: pd.Dat
     checks["drift"] = _check(not (abs(drift) > 0.012), drift,
                              lambda: f"Drifting {abs(round(drift * 100, 1))}% a day against the stations; calibration may be overdue.")
 
-    # 8. Calibration date: BMC wants every sensor calibrated every 2 months. No record is not enough data.
+    # 8. Calibration date: BMC wants every sensor calibrated every 2 months. No record is not enough data;
+    # a date after the audited week can't vouch for these readings, so it fails as unknown.
     cal = spec.calibrated_on
-    age = (as_of - cal).days if cal is not None else np.nan
-    checks["calibration"] = {**_check(cal is None or as_of <= cal + CAL_DUE, age,
-                                      lambda: f"Last calibrated on {_date(cal)}, {age} days ago; due every 2 months."),
-                             "on": None if cal is None else cal.date().isoformat()}
+    later = cal is not None and cal > as_of
+    age = (as_of - cal).days if cal is not None and not later else np.nan
+    checks["calibration"] = {**_check(cal is None or (not later and as_of <= cal + CAL_DUE), age, lambda: (
+        f"The calibration date on record, {_date(cal)}, is after the audited week, so it can't vouch for these readings."
+        if later else f"Last calibrated on {_date(cal)}, {age} days ago; due every 2 months.")),
+        "on": None if cal is None else cal.date().isoformat()}
 
     lost = sum(PENALTY[k] for k, c in checks.items() if not c["ok"])
     sc = float(max(0, 100 - lost))

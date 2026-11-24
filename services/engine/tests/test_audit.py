@@ -209,6 +209,12 @@ def test_sensor_calibrated_last_month_passes(env):
     assert r.checks["calibration"]["on"] == "2025-12-20"  # the date this audit used, kept with it
 
 
+def test_a_calibration_date_after_the_audited_week_fails_as_unknown(env):
+    r = run(env, "none", calibrated_on=T0.floor("D") + pd.Timedelta(days=3))
+    c = r.checks["calibration"]
+    assert not c["ok"] and c["value"] is None and "after the audited week" in c["reason"]
+
+
 def test_simulated_calibration_is_monthly_and_fixed_in_time():
     a = audit.simulated_calibration("A-1", T0)
     assert T0 - pd.Timedelta(days=30) < a <= T0
