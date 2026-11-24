@@ -56,7 +56,8 @@ export function fmtExposure(n: number): string {
 export const EXPOSURE_DEFINITION =
   "Person-exposure is people × the PM10 a site adds where they are (µg/m³) × hours, at every school, hospital and " +
   "home cell the plume reaches, however faint. The figure at 15 µg/m³ or more counts only the places the Safe-Work " +
-  "Windows flag, and can be checked against the exposures rows. People: homes from Census 2011 spread over mapped " +
-  "housing; 800 per school and 400 per hospital, assumed. Without the plan, dusty work runs every allowed hour, " +
+  "Windows flag, and can be checked against the exposures rows. People: homes from Census 2011 spread over the ward's " +
+  "mapped housing; homes downwind in neighbouring wards are estimated at this ward's density, not counted; 800 per " +
+  "school and 400 per hospital, assumed. Without the plan, dusty work runs every allowed hour, " +
   "06:00–22:00 IST; with it, each Avoid hour's work moves to the cleanest Go or Caution hour that day that is lower " +
   "on both counts, and its dust there is counted. Modelled from the forecast, not measured.";

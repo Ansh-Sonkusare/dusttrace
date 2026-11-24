@@ -54,7 +54,7 @@ export default async function Overview() {
             <div className="ph"><h2>Dust kept off people</h2><span className="meta">Next 48 h · modelled</span></div>
             <div className="pb">
               {!ex ? <p className="small muted" style={{ margin: 0 }}>Not worked out for this run yet; the next run adds it.</p> : ex.sites_with_avoid === 0 ? (
-                <p className="small" style={{ margin: 0 }}>{ex.sites === 0 ? "No real sites in this run." : <>No real site has an Avoid hour between 06:00 and 22:00 in this forecast, so there is no work to move. Their dust puts <span className="tab">{fmtExposure(ex.without_plan)}</span> person·µg/m³·h on people either way.</>}</p>
+                <p className="small" style={{ margin: 0 }}>{ex.sites === 0 ? "No real sites in this run." : <>No real site has an Avoid hour between 06:00 and 22:00 in this forecast, so there is no work to move. Their dust puts <span className="tab">{fmtExposure(ex.without_plan)}</span> person·µg/m³·h on people either way, <span className="tab">{fmtExposure(ex.without_ward)}</span> of it inside the ward&apos;s boundary; the rest falls on homes in neighbouring wards, whose people are estimated from this ward&apos;s density, not counted.</>}</p>
               ) : (
                 <>
                   <div className="stat" style={{ padding: 0 }}>
@@ -62,6 +62,7 @@ export default async function Overview() {
                     <span className="d">of the dust real sites put on people avoidable if every site follows its plan: <b className="tab">{fmtExposure(ex.avoided)}</b> of <span className="tab">{fmtExposure(ex.without_plan)}</span> person·µg/m³·h, by moving {ex.moved_hours} Avoid {ex.moved_hours === 1 ? "hour" : "hours"} at {ex.sites_with_avoid} {ex.sites_with_avoid === 1 ? "site" : "sites"}{ex.stuck_hours > 0 ? `; ${ex.stuck_hours} more ${ex.stuck_hours === 1 ? "has" : "have"} no better hour that day` : ""}.</span>
                   </div>
                   {ex.avoided_15_pct != null && <p className="small" style={{ margin: "12px 0 0" }}>Where it adds 15 µg/m³ or more: <span className="tab">{Math.round(ex.avoided_15_pct)}%</span> (<span className="tab">{fmtExposure(ex.avoided_15)}</span> of <span className="tab">{fmtExposure(ex.without_15)}</span>).</p>}
+                  {ex.avoided_ward_pct != null && <p className="small" style={{ margin: "12px 0 0" }}>Inside the ward&apos;s boundary: <span className="tab">{Math.round(ex.avoided_ward_pct)}%</span> (<span className="tab">{fmtExposure(ex.avoided_ward)}</span> of <span className="tab">{fmtExposure(ex.without_ward)}</span>). The rest falls on homes in neighbouring wards, whose people are estimated from this ward&apos;s density, not counted.</p>}
                   <p className="small" style={{ margin: "12px 0 0" }}>{accepted.plans === 0 ? "No site has accepted a plan in the last 7 days." : <>Plans accepted in the last 7 days ({accepted.plans}) keep <b className="tab">{fmtExposure(accepted.avoided)}</b> person·µg/m³·h off people, if followed. Not checked on site.</>}</p>
                 </>
               )}

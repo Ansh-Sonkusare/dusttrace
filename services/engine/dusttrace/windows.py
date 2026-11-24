@@ -53,6 +53,7 @@ class SiteHour:
     exposed_people: int = 0
     person_exposure: float = 0.0     # people x increment (µg/m³) over every receptor, however faint
     person_exposure_15: float = 0.0  # the part over `exposures`, the receptors given 15 µg/m³ or more
+    person_exposure_ward: float = 0.0  # the part from receptors inside the ward's boundary (`in_ward`)
     sensitive_hit: bool = False
     reason: str = ""
 
@@ -82,9 +83,10 @@ def _rain_text(factor: float, mm: float, since) -> str:
 def evaluate(sites: pd.DataFrame, receptors: pd.DataFrame, wx_future: pd.DataFrame,
              ward_p_exceed: pd.Series, settings: Settings) -> list[SiteHour]:
     """`wx_future` has ts, wind_speed, wind_dir, blh, and optionally precip with `rain_effect`'s columns.
-    `ward_p_exceed` is indexed by ts."""
+    `receptors` may say which are inside the ward's boundary (`in_ward`). `ward_p_exceed` is indexed by ts."""
     out: list[SiteHour] = []
     rec = receptors.reset_index(drop=True)
+    inside = rec["in_ward"].to_numpy(dtype=bool) if "in_ward" in rec else np.ones(len(rec), dtype=bool)
     for _, s in sites.iterrows():
         q = plume.emission_g_s(float(s["area_m2"]), s["activity"])
         setback = math.sqrt(float(s["area_m2"]))
@@ -101,7 +103,9 @@ def evaluate(sites: pd.DataFrame, receptors: pd.DataFrame, wx_future: pd.DataFra
                 xs = np.array([p[0] for p in xy])
                 ys = np.array([p[1] for p in xy])
                 conc = plume.concentration(xs, ys, q_h, met, setback)
-                sh.person_exposure = float((rec["population"].to_numpy(dtype=float) * conc).sum())
+                people = rec["population"].to_numpy(dtype=float) * conc
+                sh.person_exposure = float(people.sum())
+                sh.person_exposure_ward = float(people[inside].sum())
                 worst = None
                 for r, c in zip(rec.itertuples(), conc):
                     if c >= settings.caution_threshold:

@@ -10,6 +10,9 @@ alter table safe_windows add column if not exists person_exposure_15 real not nu
 alter table safe_windows add column if not exists move_to timestamptz;           -- null: nothing to move, or no better hour
 alter table safe_windows add column if not exists avoided real not null default 0;
 alter table safe_windows add column if not exists avoided_15 real not null default 0;
+-- The part of person_exposure from receptors inside the ward's boundary. Home cells in neighbouring wards get this
+-- ward's housing density, an estimate rather than a census count.
+alter table safe_windows add column if not exists person_exposure_ward real not null default 0;
 
 -- Per site and run, over the run's 48 h.
 create table if not exists exposure_avoided (
@@ -27,6 +30,9 @@ create table if not exists exposure_avoided (
   stuck_hours   integer not null default 0,         -- Avoid hours with no better hour that day
   primary key (run_id, site_id)
 );
+
+alter table exposure_avoided add column if not exists without_ward double precision not null default 0;
+alter table exposure_avoided add column if not exists avoided_ward double precision not null default 0;  -- can dip below 0
 
 alter table exposure_avoided enable row level security;
 
@@ -51,7 +57,11 @@ create or replace view exposure_avoided_ward with (security_invoker = true) as
          count(*) filter (where s.demo)::int as demo_sites,
          coalesce(sum(e.avoided) filter (where s.demo), 0) as demo_avoided,
          a.plans as accepted_plans, a.sites as accepted_sites, a.avoided as accepted_avoided,
-         a.avoided_15 as accepted_avoided_15
+         a.avoided_15 as accepted_avoided_15,
+         coalesce(sum(e.without_ward) filter (where not s.demo), 0) as without_ward,
+         coalesce(sum(e.avoided_ward) filter (where not s.demo), 0) as avoided_ward,
+         round((100 * sum(e.avoided_ward) filter (where not s.demo)
+                / nullif(sum(e.without_ward) filter (where not s.demo), 0))::numeric, 1)::real as avoided_ward_pct
     from runs r
     join exposure_avoided e on e.run_id = r.id
     join sites s on s.id = e.site_id

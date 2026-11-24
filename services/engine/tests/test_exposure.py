@@ -11,10 +11,13 @@ from dusttrace.windows import SiteHour
 DAY = pd.Timestamp("2026-11-24T00:00Z")  # 05:30 IST
 
 
-def hour(ist: float, status: str, pe15: float, site: str = "A", day: int = 0, faint: float = 0.0) -> SiteHour:
-    """A site hour at `ist` o'clock IST: `pe15` person·µg/m³ at receptors given 15 µg/m³ or more, `faint` below that."""
+def hour(ist: float, status: str, pe15: float, site: str = "A", day: int = 0, faint: float = 0.0,
+         outside: float = 0.0) -> SiteHour:
+    """A site hour at `ist` o'clock IST: `pe15` person·µg/m³ at receptors given 15 µg/m³ or more, `faint` below that,
+    and `outside` of the total from people beyond the ward's boundary."""
     ts = DAY + pd.Timedelta(days=day, hours=ist - 5.5)
-    return SiteHour(site, ts, [], 0.0, 0.0, status=status, person_exposure=pe15 + faint, person_exposure_15=pe15)
+    return SiteHour(site, ts, [], 0.0, 0.0, status=status, person_exposure=pe15 + faint, person_exposure_15=pe15,
+                    person_exposure_ward=pe15 + faint - outside)
 
 
 def at(ist: float, day: int = 0) -> pd.Timestamp:
@@ -46,6 +49,13 @@ def test_a_move_never_puts_more_dust_on_people_in_total():
     # 13:00 reaches nobody at 15 µg/m³ but spreads more faint dust than the Avoid hour itself: no move.
     p = exposure.plan_site([hour(9, "avoid", 50_000), hour(13, "go", 0, faint=80_000)])
     assert p.moves == {} and p.stuck == [at(9)] and p.avoided == 0
+
+
+def test_the_part_inside_the_ward_is_kept_beside_the_total():
+    p = exposure.plan_site([hour(9, "avoid", 50_000, outside=30_000), hour(13, "go", 0, faint=10_000, outside=2_000),
+                            hour(23, "go", 0, faint=5_000)])                  # 23:00 is not a work hour
+    assert p.without == 60_000 and p.without_ward == 28_000
+    assert p.avoided == 40_000 and p.avoided_ward == 12_000                   # 20,000 - 8,000 inside the ward
 
 
 def test_moved_work_still_makes_dust_where_it_goes():

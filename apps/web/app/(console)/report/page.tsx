@@ -69,6 +69,9 @@ export default async function WeeklyReport() {
                   {!ex ? <td colSpan={4} className="muted">Not worked out for this run</td> : <>
                     <td className="tab">{fmtExposure(ex.without_plan)}</td><td className="tab">{fmtExposure(ex.avoided)}</td><td className="tab">{pct(ex.avoided, ex.without_plan)}</td>
                     <td className="tab">{pct(ex.avoided_15, ex.without_15)}</td></>}</tr>
+                {ex && <tr><td>Of which inside the ward&apos;s boundary (the rest: neighbouring wards&apos; homes, estimated from this ward&apos;s density)</td>
+                  <td className="tab">{fmtExposure(ex.without_ward)}</td><td className="tab">{fmtExposure(ex.avoided_ward)}</td>
+                  <td className="tab">{pct(ex.avoided_ward, ex.without_ward)}</td><td className="muted">–</td></tr>}
                 <tr><td>Plans sites accepted in the last 7 days{accepted.plans ? ` (${accepted.plans})` : ""}</td>
                   <td className="muted">–</td><td className="tab">{accepted.plans ? fmtExposure(accepted.avoided) : "None accepted"}</td><td className="muted" colSpan={2}>If followed</td></tr>
               </tbody>

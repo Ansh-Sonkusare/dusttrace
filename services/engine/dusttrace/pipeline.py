@@ -256,6 +256,8 @@ def run(conn, settings: Settings) -> dict:
     recs = db.read_receptors(conn, ward_id)
     for c in ["lat", "lon"]:
         recs[c] = recs[c].astype(float)
+    boundary = load_seed(ward_id)["ward"].get("boundary")  # the polygon itself: it runs past the ward's rough box
+    recs["in_ward"] = [geo.inside(r.lat, r.lon, boundary) for r in recs.itertuples()]
     hours = windows.evaluate(sites, recs, future, ward_fc, settings)
     plans = exposure.plan(hours)
     db.write_site_hours(conn, run_id, hours, plans)

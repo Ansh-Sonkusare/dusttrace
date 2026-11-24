@@ -65,7 +65,7 @@ export default async function PlanPage({ params, searchParams }: {
                   ? "There is no better hour on the same day for the work in the hours to avoid. Holding it to another day is what keeps the dust off your neighbours."
                   : "No hour to avoid between 06:00 and 22:00 in the next 24 hours, so there is no work to move."}
           </p>
-          {gain.without > 0 && <p className="small muted" style={{ margin: 0 }}>Counted as people × the dust your site adds where they live, study or are treated (µg/m³) × hours: <span className="tab">{fmtExposure(gain.without)}</span> person·µg/m³·h if dusty work runs every hour from 06:00 to 22:00, <span className="tab">{fmtExposure(gain.with)}</span> if you follow the plan. Worked out from the weather forecast, not measured.</p>}
+          {gain.without > 0 && <p className="small muted" style={{ margin: 0 }}>Counted as people × the dust your site adds where they live, study or are treated (µg/m³) × hours: <span className="tab">{fmtExposure(gain.without)}</span> person·µg/m³·h if dusty work runs every hour from 06:00 to 22:00, <span className="tab">{fmtExposure(gain.with)}</span> if you follow the plan. Homes across the ward boundary are estimated from this ward&apos;s density. Worked out from the weather forecast, not measured.</p>}
         </div>
       </section>
       {mist.length > 0 && (

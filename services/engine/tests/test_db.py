@@ -631,7 +631,7 @@ def test_run_stores_exposure_avoided_per_site_and_for_the_ward(conn, settings):
     rid = pipeline.run(conn, settings)["run_id"]
     rows = {r[0]: r[1:] for r in conn.execute(
         """select site_id, without_plan, with_plan, avoided, avoided_pct, without_15, with_15, avoided_15, avoided_15_pct,
-                  moved_hours, stuck_hours from exposure_avoided where run_id=%s""", (rid,)).fetchall()}
+                  moved_hours, stuck_hours, without_ward from exposure_avoided where run_id=%s""", (rid,)).fetchall()}
     assert sorted(rows) == list("ABCDEF")
     allowed = "extract(epoch from ({} at time zone 'Asia/Kolkata')::time) / 3600 between 6 and 21"  # ends by 22:00
     # The 15 µg/m³ figure by hand from the exposures rows: people x µg/m³ added, over the hours 06:00-22:00 IST.
@@ -642,10 +642,12 @@ def test_run_stores_exposure_avoided_per_site_and_for_the_ward(conn, settings):
     per_hour = {r[0]: r[1:] for r in conn.execute(
         f"""select site_id, sum(person_exposure::float8) filter (where {allowed.format('ts')}),
                    sum(avoided::float8), sum(avoided_15::float8),
-                   count(*) filter (where status = 'avoid' and {allowed.format('ts')})
+                   count(*) filter (where status = 'avoid' and {allowed.format('ts')}),
+                   sum(person_exposure_ward::float8) filter (where {allowed.format('ts')})
               from safe_windows where run_id=%s group by site_id""", (rid,)).fetchall()}
-    for sid, (wo, wi, av, pct, wo15, wi15, av15, pct15, moved, stuck) in rows.items():
-        hour_wo, hour_av, hour_av15, avoid_hours = per_hour[sid]
+    for sid, (wo, wi, av, pct, wo15, wi15, av15, pct15, moved, stuck, wo_ward) in rows.items():
+        hour_wo, hour_av, hour_av15, avoid_hours, hour_wo_ward = per_hour[sid]
+        assert wo_ward == pytest.approx(hour_wo_ward, rel=1e-4, abs=5) and 0 <= wo_ward <= wo + 1  # inside the boundary
         assert wo15 == pytest.approx(float(by_hand[sid]), rel=1e-4, abs=1)
         assert wo == pytest.approx(hour_wo, rel=1e-4, abs=5) and wo >= wo15 - 1  # faint dust adds to the rows
         assert av >= 0 and av15 >= 0 and wi == pytest.approx(wo - av, abs=1) and wi15 == pytest.approx(wo15 - av15, abs=1)
@@ -685,6 +687,8 @@ def test_the_ward_view_counts_what_accepted_plans_keep_off_people(conn, settings
     conn.execute("update sites set demo = false where id = %s", (site,))  # a real site; the rest stay demo
     ward = "select sites, avoided, accepted_plans, accepted_sites, accepted_avoided from exposure_avoided_ward where run_id=%s"
     assert one(conn, ward, (rid,))[0] == 1 and one(conn, ward, (rid,))[2:] == (0, 0, 0)
+    assert one(conn, "select without_ward from exposure_avoided_ward where run_id=%s", (rid,))[0] == pytest.approx(
+        one(conn, "select without_ward from exposure_avoided where run_id=%s and site_id=%s", (rid, site))[0])
 
     # The manager accepts the plan an hour before the site's first moved hour.
     at = first - pd.Timedelta(hours=1)

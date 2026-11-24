@@ -4,6 +4,8 @@ Person-exposure is people x the PM10 a site adds where they are (µg/m³) x hour
 every school, hospital and home cell however faint the increment (`person_exposure`). The part from receptors given
 15 µg/m³ or more, the `exposures` rows, is kept beside it (`person_exposure_15`) so it can be checked by hand.
 People: Census 2011 spread over mapped homes for housing cells, and a fixed 800 per school and 400 per hospital.
+Home cells in neighbouring wards get this ward's density, an estimate rather than a count, so the part from inside
+the ward's boundary (`person_exposure_ward`) is kept beside the total too.
 
 Without DustTrace, a site does its dusty work in every hour it is allowed to, 06:00-22:00 IST (an hour must end by
 22:00), whatever the forecast.
@@ -38,6 +40,8 @@ def allowed(ts) -> bool:
 class SitePlan:
     without: float = 0.0
     without_15: float = 0.0
+    without_ward: float = 0.0
+    avoided_ward: float = 0.0  # of `avoided`, the part inside the ward's boundary
     moves: dict = field(default_factory=dict)  # Avoid hour -> (hour its work moves to, kept off, kept off at 15+)
     stuck: list = field(default_factory=list)  # Avoid hours with no better hour that day
 
@@ -69,7 +73,8 @@ class SitePlan:
 def plan_site(hours) -> SitePlan:
     """One site's plan from its forecast hours (anything with ts, status, person_exposure and person_exposure_15)."""
     work = sorted((h for h in hours if allowed(h.ts)), key=lambda h: h.ts)
-    out = SitePlan(without=sum(h.person_exposure for h in work), without_15=sum(h.person_exposure_15 for h in work))
+    out = SitePlan(without=sum(h.person_exposure for h in work), without_15=sum(h.person_exposure_15 for h in work),
+                   without_ward=sum(h.person_exposure_ward for h in work))
     days = defaultdict(list)
     for h in work:
         days[(h.ts + pd.Timedelta(hours=IST_OFFSET_H)).date()].append(h)
@@ -86,6 +91,7 @@ def plan_site(hours) -> SitePlan:
             free.remove(best)
             out.moves[src.ts] = (best.ts, src.person_exposure - best.person_exposure,
                                  src.person_exposure_15 - best.person_exposure_15)
+            out.avoided_ward += src.person_exposure_ward - best.person_exposure_ward
     out.stuck.sort()
     return out
 

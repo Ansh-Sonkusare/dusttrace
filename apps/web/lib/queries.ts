@@ -152,6 +152,7 @@ export interface WardExposure {
   without_15: number; avoided_15: number; avoided_15_pct: number | null; sites_with_avoid: number;
   moved_hours: number; stuck_hours: number; demo_sites: number; demo_avoided: number;
   accepted_plans: number; accepted_sites: number; accepted_avoided: number; accepted_avoided_15: number;
+  without_ward: number; avoided_ward: number; avoided_ward_pct: number | null; // people inside the ward's boundary
 }
 
 export async function getWardExposure(runId: number): Promise<WardExposure | null> {

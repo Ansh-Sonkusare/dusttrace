@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtExposure, moveText, planGain } from "../lib/exposure";
+import { EXPOSURE_DEFINITION, fmtExposure, moveText, planGain } from "../lib/exposure";
 import type { WindowRow } from "../lib/queries";
 
 // IST o'clock (fractions allowed) on Tue 24 Nov 2026, as a UTC ISO string.
@@ -69,6 +69,12 @@ describe("what following the plan keeps off people", () => {
   it("has no percentage when nothing reaches anyone", () => {
     expect(planGain([row(9, "go")])).toEqual({ without: 0, avoided: 0, with: 0, pct: null, without_15: 0, avoided_15: 0,
                                                pct_15: null, people: 0, stuck: 0 });
+  });
+});
+
+describe("the definition shown with the numbers", () => {
+  it("says people across the ward boundary are estimated, not counted", () => {
+    expect(EXPOSURE_DEFINITION).toContain("homes downwind in neighbouring wards are estimated at this ward's density, not counted");
   });
 });
 
