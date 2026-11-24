@@ -19,7 +19,8 @@ class Settings:
     database_url: str
     openaq_api_key: str | None
     ward_id: str
-    horizon_hours: int = 48
+    horizon_hours: int = 48  # Safe-Work Windows, plumes and exposures
+    forecast_hours: int = 72  # the PM10 forecast (PRD F3: 24, 48 and 72 h)
     # PM10 threshold that counts as an exceedance (India 24-h NAAQS for PM10 is 100 ug/m3).
     exceed_threshold: float = 100.0
     # Plume footprint threshold: modelled increment above which an area is "in the plume".

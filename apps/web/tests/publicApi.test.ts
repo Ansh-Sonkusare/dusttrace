@@ -17,6 +17,38 @@ describe("public API", () => {
     expect(f.units).toBe("µg/m³");
   });
 
+  it("forecast adds the ward's daily 24 h mean exceedance, keeping the hourly shape", () => {
+    const hour = { ts: "2026-10-13T08:00:00.000Z", pm10: 80, pm10_lo: 60, pm10_hi: 110, p_exceed: 0.21 }; // the last hour of day 1
+    const day = { station_id: "ward", day: 1, starts_at: "2026-10-12T09:00:00.000Z", ends_at: "2026-10-13T08:00:00.000Z", p_exceed: 0.4567 };
+    const f = publicForecast(run, [hour], "K-East", [day, { ...day, station_id: "openaq-1", p_exceed: 0.9 }]);
+    expect(f.hours[0]).toEqual({ ts: hour.ts, pm10: 80, pm10_lo: 60, pm10_hi: 110, p_exceed_100: 0.21 });
+    expect(f.daily_24h_mean).toEqual([{ day: 1, from: day.starts_at, to: day.ends_at, p_exceed_100: 0.46 }]);
+    expect(publicForecast(run, [hour], "K-East").daily_24h_mean).toEqual([]);
+  });
+
+  it("forecast says where persistence beat the model, and no day runs past the last hour", () => {
+    const hour = { ts: "2026-11-26T23:00:00.000Z", pm10: 80, pm10_lo: 60, pm10_hi: 110, p_exceed: 0.21 };
+    const day3 = { station_id: "ward", day: 3, starts_at: "2026-11-26T01:00:00.000Z", ends_at: "2026-11-27T00:00:00.000Z", p_exceed: 0.99 };
+    const bt = { train_end: "2026-09-24T00:00:00.000Z", test_end: "2026-11-23T00:00:00.000Z", origins: 53, data_mode: "live",
+      metrics: { "1-24": { mae_model: 20.87, mae_persistence: 20.5, f1_exceed_model: 0.663, f1_exceed_persistence: 0.646 } },
+      daily: { stations: { "1": { f1_model: 0.764, f1_persistence: 0.803 } } } };
+    const f = publicForecast(run, [hour], "P-North", [day3], bt);
+    expect(f.daily_24h_mean[0].to).toBe("2026-11-26T23:00:00.000Z");
+    expect(f.backtest).toEqual({ from: bt.train_end, to: bt.test_end, forecasts: 53, data_mode: "live", persistence_better: [
+      { scope: "hours 1–24", measure: "mean error, µg/m³", model: 20.9, persistence: 20.5 },
+      { scope: "stations, day 1", measure: "F1, 24 h mean above 100", model: 0.76, persistence: 0.8 },
+    ] });
+    expect(publicForecast(run, [hour], "P-North", [day3]).backtest).toBeNull();
+  });
+
+  it("forecast says where it stops when the weather forecast runs out", () => {
+    const short = { ...run, metrics: { ...run.metrics, forecast_hours: 72, weather_hours: 60 } };
+    const f = publicForecast(short, [], "K-East");
+    expect(f.weather_hours).toBe(60);
+    expect(f.note).toBe("The forecast stops at hour 60 because the weather forecast does. Day 3 has under 18 hours of weather, so it has no daily chance.");
+    expect(publicForecast(run, [], "K-East").note).toBeNull();
+  });
+
   it("windows are per site and hour, without receptor names or people counts", () => {
     const w = publicWindows([{ site_id: "osm-way-1", ts: "2026-10-12T09:00:00.000Z", status: "avoid", exposed_people: 900, sensitive_hit: true,
       reason: "Plume reaches Marol Maternity Home" }], [{ id: "osm-way-1", name: "Metro Casting Yard", demo: false, source: "osm", lat: 19.1, lon: 72.8 }]);

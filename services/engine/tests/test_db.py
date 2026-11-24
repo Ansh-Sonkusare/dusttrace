@@ -1,5 +1,7 @@
 """Database integration tests. They need TEST_DATABASE_URL (Postgres + PostGIS) and skip without it."""
 
+import json
+
 import numpy as np
 import psycopg
 import pytest
@@ -26,7 +28,7 @@ def test_synthetic_pipeline_end_to_end(conn, settings):
     assert one(conn, "select id from latest_run")[0] == out["run_id"]
 
     h = settings.horizon_hours
-    assert one(conn, "select count(*) from forecasts where run_id=%s and station_id='ward'", (out["run_id"],))[0] == h
+    assert one(conn, "select count(*) from forecasts where run_id=%s and station_id='ward'", (out["run_id"],))[0] == 72
     assert one(conn, "select count(distinct station_id) from forecasts where run_id=%s", (out["run_id"],))[0] == 4
     assert one(conn, "select count(*) from safe_windows where run_id=%s", (out["run_id"],))[0] == 6 * h
     assert one(conn, "select count(*) from plumes where run_id=%s", (out["run_id"],))[0] == 6 * h
@@ -307,6 +309,85 @@ def test_backtest_is_stored_and_labelled(conn, settings):
     assert row[0] == "synthetic"          # no real readings in this database
     assert row[1] >= 7 and "1-24" in row[2] and row[3]
 
+
+
+def test_run_forecasts_72_hours_and_stores_daily_exceedance_but_windows_stay_48(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    out = pipeline.run(conn, settings)
+    rid, t0 = out["run_id"], pd.Timestamp(out["issued_at"])
+    per = conn.execute("select station_id, count(*), max(ts) from forecasts where run_id=%s group by station_id", (rid,)).fetchall()
+    assert len(per) == 4 and all(n == 72 and mx == t0 + pd.Timedelta(hours=72) for _, n, mx in per)
+    assert one(conn, "select max(ts) from safe_windows where run_id=%s", (rid,))[0] == t0 + pd.Timedelta(hours=48)
+    assert one(conn, "select max(ts) from plumes where run_id=%s", (rid,))[0] == t0 + pd.Timedelta(hours=48)
+    days = conn.execute("""select station_id, day, starts_at, ends_at, p_exceed from forecast_daily where run_id=%s
+                            order by station_id, day""", (rid,)).fetchall()
+    assert {r[0] for r in days} == {r[0] for r in per} and len(days) == 4 * 3
+    assert all(0 <= r[4] <= 1 for r in days)
+    assert [(r[1], r[2], r[3]) for r in days if r[0] == "ward"] == [
+        (d, t0 + pd.Timedelta(hours=24 * d - 23), t0 + pd.Timedelta(hours=24 * d)) for d in (1, 2, 3)]
+    assert [d["day"] for d in out["ward_days"]] == [1, 2, 3]
+    assert out["metrics"]["forecast_inputs"] == {"cams": False, "festival": False, "upwind_sites": False, "evidence": None}
+
+
+def test_the_forecast_stops_where_the_weather_forecast_does(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    t0 = one(conn, "select max(ts) from readings")[0]
+    conn.execute("delete from weather_hourly where ts > %s", (t0 + pd.Timedelta(hours=60),))
+    conn.commit()
+    out = pipeline.run(conn, settings)
+    assert pd.Timestamp(out["issued_at"]) == t0
+    assert one(conn, "select count(*), max(ts) from forecasts where run_id=%s and station_id='ward'",
+               (out["run_id"],)) == (60, t0 + pd.Timedelta(hours=60))
+    assert out["metrics"]["weather_hours"] == 60 and out["metrics"]["forecast_hours"] == 72
+    assert [d["day"] for d in out["ward_days"]] == [1, 2]  # day 3 would have 12 of its 24 hours of weather
+
+
+def test_backtest_scores_49_to_72_hours_and_the_daily_calls(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=90)
+    out = pipeline.backtest(conn, settings, days=10)
+    m, daily, note = one(conn, "select metrics, daily, note from backtests where id=%s", (out["id"],))
+    assert set(m) == {"1-24", "25-48", "49-72"} and set(daily) == {"ward", "stations", "window"}
+    assert set(daily["ward"]) == {"1", "2", "3"} and daily["ward"]["3"]["n"] == out["origins"]
+    assert "exceed_days" in daily["stations"]["1"] and "Inputs as in runs" in note
+
+
+def _osm_site_near_chakala(conn):
+    db.upsert_sites(conn, [{"id": "osm-way-202", "name": "Andheri works", "activity": "excavation", "lat": 19.1150,
+                            "lon": 72.8622, "area_m2": 30000, "source": "osm"}], "K-East")
+    conn.commit()
+
+
+def test_compare_inputs_stores_each_input_and_runs_follow_only_real_evidence(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=90)
+    _osm_site_near_chakala(conn)
+    out = pipeline.compare_inputs(conn, settings, days=4)
+    kind, mode, m, daily = one(conn, "select kind, data_mode, metrics, daily from backtests where id=%s", (out["id"],))
+    assert kind == "inputs" and mode == "synthetic"
+    assert set(m) == {"without", "festival", "upwind_sites", "change"} and set(daily) == {"without", "festival", "upwind_sites"}
+    assert set(m["change"]) == {"festival", "upwind_sites"} and {"mae", "f1_hourly", "f1_daily", "on"} <= set(m["change"]["festival"])
+    assert m["without"]["1-24"]["n"] == m["festival"]["1-24"]["n"] == m["upwind_sites"]["1-24"]["n"]
+    # synthetic evidence never switches an input on
+    assert pipeline.run(conn, settings)["metrics"]["forecast_inputs"]["evidence"] is None
+
+    real = {"festival": {"mae": -0.2, "f1_hourly": 0.01, "f1_daily": 0.0, "on": True},
+            "upwind_sites": {"mae": 0.3, "f1_hourly": 0.0, "f1_daily": -0.02, "on": False}}
+    ev = conn.execute("""insert into backtests (ward_id, kind, data_mode, train_end, test_end, origins, metrics)
+                         values ('K-East', 'inputs', 'live', now(), now(), 30, %s) returning id""",
+                      (json.dumps({"change": real}),)).fetchone()[0]
+    conn.commit()
+    out = pipeline.run(conn, settings)
+    assert out["metrics"]["forecast_inputs"] == {"cams": False, "festival": True, "upwind_sites": False, "evidence": ev}
+    assert one(conn, "select model from runs where id=%s", (out["run_id"],))[0] == "lightgbm-direct-v1+festival"
+
+
+def test_upwind_sites_use_real_sites_only(conn, settings):
+    assert pipeline.upwind_tables(conn, ["seed-chakala"]) is None  # only the demo sites A-F so far
+    db.upsert_sites(conn, [{"id": "osm-way-303", "name": "Far works", "activity": "structure", "lat": 19.2000,
+                            "lon": 72.9500, "area_m2": 50000, "source": "osm"}], "K-East")
+    assert pipeline.upwind_tables(conn, ["seed-chakala"]) is None  # 13 km away: nothing upwind of any station
+    _osm_site_near_chakala(conn)
+    t = pipeline.upwind_tables(conn, ["seed-chakala"])["seed-chakala"]
+    assert t[0] == pytest.approx(3.0) and t[180] == 0  # 3 ha about 530 m north of the station
 
 
 def test_backtest_uses_only_real_stations_when_there_are_some(conn, settings):

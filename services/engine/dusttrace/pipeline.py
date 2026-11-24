@@ -28,7 +28,7 @@ def now_hour() -> pd.Timestamp:
 
 
 def ingest(conn, settings: Settings, mode: str = "auto", days: int = 120) -> dict:
-    """Load weather (history + 3-day forecast) and station readings. Returns what was loaded and how."""
+    """Load weather (history + forecast past 72 h) and station readings. Returns what was loaded and how."""
     seed = load_seed(settings.ward_id)
     ward = seed["ward"]
     now = now_hour()
@@ -39,7 +39,7 @@ def ingest(conn, settings: Settings, mode: str = "auto", days: int = 120) -> dic
     if mode in ("auto", "live"):
         try:
             past = min(days, 92)
-            wx = openmeteo.fetch_forecast(ward["center_lat"], ward["center_lon"], past_days=past, forecast_days=3)
+            wx = openmeteo.fetch_forecast(ward["center_lat"], ward["center_lon"], past_days=past, forecast_days=4)
             wx_live = not wx.empty
         except Exception as e:  # network blocked, API down, etc.
             if mode == "live":
@@ -203,7 +203,8 @@ def load_sites_osm(conn, settings: Settings) -> int:
 
 
 def run(conn, settings: Settings) -> dict:
-    """Train, forecast 48 h, model plumes and issue Safe-Work Windows. Writes one `runs` row."""
+    """Train, forecast 72 h (hourly, and P(24 h mean > 100) for days 1-3), model plumes and issue 48 h of
+    Safe-Work Windows. Writes one `runs` row."""
     ward_id = settings.ward_id
     wx = db.read_frame(conn, "select ts, wind_speed, wind_dir, blh, temp, rh, precip, synthetic from weather_hourly where ward_id=%s order by ts", (ward_id,))
     rd = db.read_frame(conn, """select r.station_id, r.ts, r.pm10, r.pm25, r.synthetic from readings r
@@ -229,10 +230,11 @@ def run(conn, settings: Settings) -> dict:
 
     # Train on measured hours only; filled hours only let the forecast start from now.
     train_rd = rd[~rd["filled"].astype(bool)]
-    cm = cams_features(conn, ward_id, list(active))
-    model = forecast.train(train_rd[["station_id", "ts", "pm10"]], wx, settings.horizon_hours, settings.exceed_threshold,
-                           cams=cm)
-    fc = forecast.predict(model, rd[["station_id", "ts", "pm10"]], wx, t0, settings.horizon_hours, cams=cm)
+    inputs, inputs_on = forecast_inputs(conn, ward_id, list(active))
+    model = forecast.train(train_rd[["station_id", "ts", "pm10"]], wx, settings.forecast_hours, settings.exceed_threshold,
+                           **inputs)
+    fc = forecast.predict(model, rd[["station_id", "ts", "pm10"]], wx, t0, settings.forecast_hours, cams=inputs["cams"])
+    daily = forecast.predict_daily(model, rd[["station_id", "ts", "pm10"]], wx, t0, cams=inputs["cams"])
 
     data_mode = _mode(wx["synthetic"].any(), wx["synthetic"].all(), rd["synthetic"].any(), rd["synthetic"].all())
     if data_mode == "live" and rd["filled"].astype(bool).any():
@@ -243,10 +245,15 @@ def run(conn, settings: Settings) -> dict:
     fill_info["hours"] = int(used.groupby("station_id").size().max()) if len(used) else 0
     metrics = {**model.metrics, "stations": list(active), "audit": bench, "newest_real_reading": newest_real,
                "filled": fill_info, "inputs": verify_mod.input_shares(rd, t0),
+               "forecast_hours": settings.forecast_hours, "forecast_inputs": inputs_on,
+               # Hours after t0 with a weather forecast. The PM10 forecast stops where it does.
+               "weather_hours": int(wx["ts"].between(t0 + pd.Timedelta(hours=1), t0 + pd.Timedelta(hours=settings.forecast_hours)).sum()),
                "signatures": {k: {x: v[x] for x in ("signature", "pm10", "ratio", "base_ratio", "ts")} for k, v in sigs.items()}}
-    model_name = "lightgbm-direct-v1" + ("+cams" if cm is not None else "")
+    model_name = "lightgbm-direct-v1" + "".join(f"+{k}" for k, on in (("cams", inputs_on["cams"]), ("festival", inputs_on["festival"]),
+                                                                       ("upwind-sites", inputs_on["upwind_sites"])) if on)
     run_id = db.create_run(conn, ward_id, t0.to_pydatetime(), data_mode, model_name, metrics)
     db.write_forecasts(conn, run_id, fc)
+    db.write_forecast_daily(conn, run_id, daily)
     db.write_audits(conn, run_id, audits)
 
     ward_fc = fc[fc["station_id"] == "ward"].set_index("ts")["p_exceed"]
@@ -281,9 +288,12 @@ def run(conn, settings: Settings) -> dict:
     conn.commit()
 
     counts = pd.Series([h.status for h in hours]).value_counts().to_dict()
+    ward_days = daily[daily["station_id"] == "ward"]
     return {"run_id": run_id, "issued_at": t0.isoformat(), "data_mode": data_mode,
             "metrics": metrics, "window_counts": counts, "stations": list(active),
-            "sensor_trust": {a.site_id: a.score for a in audits}}
+            "sensor_trust": {a.site_id: a.score for a in audits},
+            "ward_days": [{"day": int(r.day), "from": r.starts_at.isoformat(), "to": r.ends_at.isoformat(),
+                           "p_24h_mean_above_100": round(float(r.p_exceed), 3)} for r in ward_days.itertuples()]}
 
 
 def rank_sites(conn, ward_id: str, sites: pd.DataFrame, station_ids: list[str], future: pd.DataFrame,
@@ -634,6 +644,34 @@ def cams_features(conn, ward_id: str, station_ids: list[str]) -> pd.DataFrame | 
     return cm
 
 
+def upwind_tables(conn, station_ids: list[str]) -> dict | None:
+    """Mapped construction upwind of each station (forecast.upwind_site_area), from the active real sites (OSM or
+    satellite-confirmed, never the demo ones) of every pilot ward. The site list has no history: it says where
+    construction is mapped now, not when each site was active, so on past hours this input only tells the model
+    which wind directions carry today's mapped sites towards a station. Sites outside both wards are not listed.
+    None when no site is within reach of any station: the input would be zero everywhere and say nothing."""
+    sites = db.read_frame(conn, "select lat, lon, area_m2 from sites where active and not demo")
+    if sites.empty:
+        return None
+    st = db.read_frame(conn, "select id, lat, lon from stations where id = any(%s)", (station_ids,))
+    tables = forecast.upwind_site_area(st, sites)
+    return tables if any(t.any() for t in tables.values()) else None
+
+
+def forecast_inputs(conn, ward_id: str, station_ids: list[str]) -> tuple[dict, dict]:
+    """The forecast's optional inputs (keyword arguments for forecast.train) and a record of which are on.
+    CAMS: when stored (issue #32). The festival calendar and upwind sites (issue #55): only when the ward's
+    latest real-data comparison (`backtest --compare-inputs`) found the input does not make the back-test worse."""
+    cm = cams_features(conn, ward_id, station_ids)
+    ev = conn.execute("""select id, metrics->'change' from backtests where ward_id=%s and kind='inputs' and data_mode='live'
+                          order by created_at desc limit 1""", (ward_id,)).fetchone()
+    change = (ev[1] or {}) if ev else {}
+    festival = bool(change.get("festival", {}).get("on"))
+    up = upwind_tables(conn, station_ids) if change.get("upwind_sites", {}).get("on") else None
+    return ({"cams": cm, "festival": festival, "upwind": up},
+            {"cams": cm is not None, "festival": festival, "upwind_sites": up is not None, "evidence": ev[0] if ev else None})
+
+
 def station_signatures(conn, ward_id: str, rd: pd.DataFrame, t0: pd.Timestamp) -> dict:
     """PM10/PM2.5 signature (F10) per real station, with its name and position for matching sites."""
     sigs = signature.station_signatures(rd, t0)
@@ -723,23 +761,59 @@ def compare_cams(conn, settings: Settings, days: int = 30) -> dict:
     return {"id": row[0], "data_mode": mode, "origins": r0.origins, "metrics": metrics}
 
 
+def compare_inputs(conn, settings: Settings, days: int = 60) -> dict:
+    """Issue #55: back-test the same window with the inputs runs use, then adding the festival calendar, then
+    adding upwind construction sites; store each variant and its change. Runs follow the latest real-data one."""
+    wx, use, is_real = _backtest_inputs(conn, settings)
+    stations = sorted(use["station_id"].unique())
+    cm = cams_features(conn, settings.ward_id, stations)
+    up = upwind_tables(conn, stations)
+    end = use["ts"].max().floor("D")
+    start = end - pd.Timedelta(days=days)
+    variants = {"without": {}, "festival": {"festival": True}, **({"upwind_sites": {"upwind": up}} if up is not None else {})}
+    runs = {name: bt.run(use[["station_id", "ts", "pm10"]], wx, start, end, settings.forecast_hours, 24,
+                         settings.exceed_threshold, cams=cm, **kw) for name, kw in variants.items()}
+    base = runs["without"]
+    change = {k: bt.change(base.metrics, base.daily, r.metrics, r.daily) for k, r in runs.items() if k != "without"}
+    wx_used = wx[(wx["ts"] >= use["ts"].min()) & (wx["ts"] <= end)]
+    mode = ("live" if not wx_used["synthetic"].any() else "mixed") if is_real else "synthetic"
+    note = (f"Same window and model, CAMS {'on' if cm is not None else 'off'} as in runs, adding one input at a time. "
+            "An input stays on only if the hourly error does not rise and neither exceedance F1 falls. "
+            + ("Upwind sites: today's mapped sites, applied to every past hour, since the site list has no dates. "
+               if up is not None else "No real construction site is mapped within 3 km of a station, so upwind sites were not tried. ")
+            + base.note)
+    row = conn.execute(
+        """insert into backtests (ward_id, kind, data_mode, stations, train_end, test_end, origins, metrics, daily, note)
+           values (%s,'inputs',%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+        (settings.ward_id, mode, base.stations, base.train_end.to_pydatetime(), base.test_end.to_pydatetime(), base.origins,
+         json.dumps({**{k: r.metrics for k, r in runs.items()}, "change": change}),
+         json.dumps({k: r.daily for k, r in runs.items()}), note)).fetchone()
+    conn.commit()
+    return {"id": row[0], "data_mode": mode, "origins": base.origins, "change": change,
+            "metrics": {k: r.metrics for k, r in runs.items()}, "daily": {k: r.daily for k, r in runs.items()}}
+
+
 def backtest(conn, settings: Settings, days: int = 60) -> dict:
-    """Back-test the forecast over the last `days` days of data (F3). Uses only real station readings
-    when there are any, so the report's numbers are real; otherwise synthetic, and labelled so."""
+    """Back-test the forecast over the last `days` days of data (F3), with the inputs runs use. Uses only real
+    station readings when there are any, so the report's numbers are real; otherwise synthetic, and labelled so."""
     wx, use, is_real = _backtest_inputs(conn, settings)
     end = use["ts"].max().floor("D")
     start = end - pd.Timedelta(days=days)
-    res = bt.run(use[["station_id", "ts", "pm10"]], wx, start, end, settings.horizon_hours, 24, settings.exceed_threshold)
+    inputs, used = forecast_inputs(conn, settings.ward_id, sorted(use["station_id"].unique()))
+    res = bt.run(use[["station_id", "ts", "pm10"]], wx, start, end, settings.forecast_hours, 24, settings.exceed_threshold,
+                 **inputs)
     wx_used = wx[(wx["ts"] >= use["ts"].min()) & (wx["ts"] <= end)]
     mode = ("live" if not wx_used["synthetic"].any() else "mixed") if is_real else "synthetic"
+    on = [label for k, label in (("cams", "CAMS"), ("festival", "festival calendar"), ("upwind_sites", "upwind sites")) if used[k]]
+    note = f"{res.note} Inputs as in runs: {', '.join(on) if on else 'station history and weather only'}."
     row = conn.execute(
-        """insert into backtests (ward_id, data_mode, stations, train_end, test_end, origins, metrics, spike_day, note)
-           values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+        """insert into backtests (ward_id, data_mode, stations, train_end, test_end, origins, metrics, spike_day, daily, note)
+           values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
         (settings.ward_id, mode, res.stations, res.train_end.to_pydatetime(), res.test_end.to_pydatetime(), res.origins,
-         json.dumps(res.metrics), json.dumps(res.spike_day) if res.spike_day else None, res.note)).fetchone()
+         json.dumps(res.metrics), json.dumps(res.spike_day) if res.spike_day else None, json.dumps(res.daily), note)).fetchone()
     conn.commit()
-    return {"id": row[0], "data_mode": mode, "stations": res.stations, "origins": res.origins,
-            "metrics": res.metrics, "spike_day": res.spike_day}
+    return {"id": row[0], "data_mode": mode, "stations": res.stations, "origins": res.origins, "inputs": used,
+            "metrics": res.metrics, "daily": res.daily, "spike_day": res.spike_day}
 
 
 def discover_sites(conn, settings: Settings, months_back: int = 12) -> dict:

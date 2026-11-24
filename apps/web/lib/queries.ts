@@ -2,6 +2,7 @@ import { q, ward } from "./db";
 import type { AuditBench } from "./audit";
 import { nodeStatus } from "./node";
 import { groupReports, PLACE_DAYS, type Place } from "./places";
+import type { DayRow, InputChange } from "./forecastDays";
 
 export type Status = "go" | "caution" | "avoid";
 
@@ -24,6 +25,9 @@ export interface Run {
     newest_real_reading?: string | null;
     filled?: { stations: number; hours: number; corrections?: Record<string, { slope: number; intercept: number; mae: number; hours: number }> };
     inputs?: { hours: number; real: number; filled: number; synthetic: number };
+    forecast_hours?: number;
+    weather_hours?: number;
+    forecast_inputs?: { cams: boolean; festival: boolean; upwind_sites: boolean; evidence: number | null };
   };
 }
 
@@ -68,6 +72,13 @@ export async function getWardForecast(runId: number): Promise<FcPoint[]> {
     [runId],
   );
   return r.map((p) => ({ ...p, ts: iso(p.ts) }));
+}
+
+// P(24 h mean PM10 > 100) for days 1-3 of the run, per station and for the ward (PRD F3).
+export async function getForecastDays(runId: number): Promise<DayRow[]> {
+  const r = await q<DayRow>(
+    "select station_id, day, starts_at, ends_at, p_exceed from forecast_daily where run_id=$1 order by station_id, day", [runId]);
+  return r.map((d) => ({ ...d, starts_at: iso(d.starts_at), ends_at: iso(d.ends_at) }));
 }
 
 export async function getStationPeaks(runId: number) {
@@ -396,18 +407,33 @@ export async function getKpis(run: Run): Promise<import("./kpi").KpiRaw> {
            decisions: x.decisions, new_reports: x.reports };
 }
 
-type BtBucket = { n: number; mae_model: number; mae_persistence: number; f1_exceed_model: number; f1_exceed_persistence: number; coverage_10_90: number; exceed_rate: number };
+// F1 is null when the window measured nothing above 100 and nothing was called.
+type BtBucket = { n: number; mae_model: number; mae_persistence: number; f1_exceed_model: number | null; f1_exceed_persistence: number | null; coverage_10_90: number; exceed_rate: number };
+export type BtDay = { n: number; exceed_days: number; hits: number; misses: number; false_alarms: number; f1_model: number | null; f1_persistence: number | null; brier: number };
 export interface Backtest {
   id: number; created_at: string; data_mode: string; stations: string[]; train_end: string; test_end: string; origins: number;
   metrics: Record<string, BtBucket>;
+  daily: { ward?: Record<string, BtDay>; stations?: Record<string, BtDay>;
+           window?: { ward_days: number; ward_exceed_days: number; station_days: number; station_exceed_days: number } } | null;
   spike_day: { day: string; actual_mean: number; issued_at: string | null; lead_hours?: number; forecast_mean?: number; p_exceed_max?: number; flagged?: boolean } | null;
   note: string | null;
 }
 
 export async function getLatestBacktest(kind: "standard" | "outage_replay" = "standard"): Promise<Backtest | null> {
   const r = await q<Backtest>(
-    `select id, created_at, data_mode, stations, train_end, test_end, origins, metrics, spike_day, note
+    `select id, created_at, data_mode, stations, train_end, test_end, origins, metrics, spike_day, daily, note
        from backtests where ward_id=$1 and kind=$2 order by created_at desc limit 1`, [await ward(), kind]);
+  return r[0] ? { ...r[0], created_at: iso(r[0].created_at), train_end: iso(r[0].train_end), test_end: iso(r[0].test_end) } : null;
+}
+
+export interface InputTrial { id: number; created_at: string; data_mode: string; origins: number; train_end: string; test_end: string;
+  change: Partial<Record<string, InputChange>>; note: string | null }
+
+// The trial runs follow: the latest on real data (`backtest --compare-inputs`, issue #55), else the latest of any kind.
+export async function getInputTrial(): Promise<InputTrial | null> {
+  const r = await q<InputTrial>(
+    `select id, created_at, data_mode, origins, train_end, test_end, coalesce(metrics->'change', '{}'::jsonb) as change, note
+       from backtests where ward_id=$1 and kind='inputs' order by data_mode = 'live' desc, created_at desc limit 1`, [await ward()]);
   return r[0] ? { ...r[0], created_at: iso(r[0].created_at), train_end: iso(r[0].train_end), test_end: iso(r[0].test_end) } : null;
 }
 
