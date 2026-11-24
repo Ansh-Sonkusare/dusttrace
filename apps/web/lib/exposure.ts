@@ -2,15 +2,19 @@
 // (services/engine/dusttrace/exposure.py) and stores them on each window row; these helpers only read them back.
 // Pure, unit-tested.
 import type { WindowRow } from "./queries";
-import { dayHour, hhmm, istHour } from "./format";
+import { dayHour, hhmm } from "./format";
 
 const HOUR = 3600_000;
-const allowed = (ts: string) => istHour(ts) >= 6 && istHour(ts) < 22; // dusty work allowed 06:00–22:00 IST
+// Dusty work is allowed 06:00–22:00 IST: an hour counts when it starts at 06:00 or later and ends by 22:00.
+const allowed = (ts: string) => {
+  const h = (((new Date(ts).getTime() / HOUR + 5.5) % 24) + 24) % 24;
+  return h >= 6 && h + 1 <= 22;
+};
 
 // Where the dusty work of an Avoid span goes: "Move the work to Tue 12:00–15:00.", or why it doesn't.
 export function moveText(span: { rows: WindowRow[] }): string {
   const work = span.rows.filter((r) => r.status === "avoid" && allowed(r.ts));
-  if (work.length === 0) return "Night hours: no dusty work to move.";
+  if (work.length === 0) return "Outside 06:00–22:00: no dusty work to move.";
   const to = work.filter((r) => r.move_to).map((r) => new Date(r.move_to!).getTime()).sort((a, b) => a - b);
   const stuck = work.length - to.length;
   if (to.length === 0) return "No better hour that day to move the work to.";

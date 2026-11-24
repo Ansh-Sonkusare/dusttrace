@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { fmtExposure, moveText, planGain } from "../lib/exposure";
 import type { WindowRow } from "../lib/queries";
 
-// IST o'clock on Tue 24 Nov 2026, as a UTC ISO string.
-const ist = (h: number) => new Date(Date.UTC(2026, 10, 24, h) - 5.5 * 3600_000).toISOString();
+// IST o'clock (fractions allowed) on Tue 24 Nov 2026, as a UTC ISO string.
+const ist = (h: number) => new Date(Date.UTC(2026, 10, 24) + (h - 5.5) * 3600_000).toISOString();
 const row = (h: number, status: WindowRow["status"], o: Partial<WindowRow> = {}): WindowRow => ({
   site_id: "A", ts: ist(h), status, exposed_people: 0, sensitive_hit: false, reason: "", person_exposure: 0,
   person_exposure_15: 0, move_to: null, avoided: 0, avoided_15: 0, ...o,
@@ -35,8 +35,10 @@ describe("where to move the work in an Avoid span", () => {
     expect(moveText(span([row(6, "avoid"), row(7, "avoid")]))).toBe("No better hour that day to move the work to.");
   });
 
-  it("says there is nothing to move at night", () => {
-    expect(moveText(span([row(22, "avoid"), row(23, "avoid")]))).toBe("Night hours: no dusty work to move.");
+  it("says there is nothing to move outside 06:00–22:00", () => {
+    expect(moveText(span([row(22, "avoid"), row(23, "avoid")]))).toBe("Outside 06:00–22:00: no dusty work to move.");
+    expect(moveText(span([row(21.5, "avoid")]))).toBe("Outside 06:00–22:00: no dusty work to move."); // runs to 22:30
+    expect(moveText(span([row(20.5, "avoid", { move_to: ist(21) })]))).toBe("Move the work to Tue 21:00–22:00.");
   });
 });
 
@@ -49,7 +51,7 @@ describe("what following the plan keeps off people", () => {
       row(10, "caution", { person_exposure: 20_000, person_exposure_15: 10_000 }),
       row(12, "go", { person_exposure: 30_000 }),                                        // faint dust only
       row(14, "avoid", { person_exposure: 4_000, person_exposure_15: 3_000 }),          // no better hour that day
-      row(22, "caution", { person_exposure: 5_000, person_exposure_15: 5_000 }),        // night
+      row(21.5, "caution", { person_exposure: 5_000, person_exposure_15: 5_000 }),      // runs past 22:00
     ];
     expect(planGain(rows)).toEqual({
       without: 124_000, avoided: 40_000, with: 84_000, pct: (40_000 / 124_000) * 100,

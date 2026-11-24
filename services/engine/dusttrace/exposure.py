@@ -5,7 +5,8 @@ every school, hospital and home cell however faint the increment (`person_exposu
 15 µg/m³ or more, the `exposures` rows, is kept beside it (`person_exposure_15`) so it can be checked by hand.
 People: Census 2011 spread over mapped homes for housing cells, and a fixed 800 per school and 400 per hospital.
 
-Without DustTrace, a site does its dusty work in every hour it is allowed to, 06:00-22:00 IST, whatever the forecast.
+Without DustTrace, a site does its dusty work in every hour it is allowed to, 06:00-22:00 IST (an hour must end by
+22:00), whatever the forecast.
 With the plan, it does the same hours of dusty work on each day, but the work of each Avoid hour moves to the cleanest
 open hour of the same day: a Go or Caution hour with less person-exposure on both counts, the least dust first (Go
 before Caution on a tie, then the nearest hour). Each open hour takes at most one moved hour, and the dust the moved
@@ -25,6 +26,12 @@ import pandas as pd
 from .plume import IST_OFFSET_H, hour_ist
 
 WORK_IST = (6, 22)  # dusty work allowed 06:00-22:00 IST
+
+
+def allowed(ts) -> bool:
+    """A work hour starting at `ts` falls inside 06:00-22:00 IST: it starts at 06:00 or later and ends by 22:00."""
+    h = hour_ist(ts)
+    return WORK_IST[0] <= h and h + 1 <= WORK_IST[1]
 
 
 @dataclass
@@ -61,7 +68,7 @@ class SitePlan:
 
 def plan_site(hours) -> SitePlan:
     """One site's plan from its forecast hours (anything with ts, status, person_exposure and person_exposure_15)."""
-    work = sorted((h for h in hours if WORK_IST[0] <= hour_ist(h.ts) < WORK_IST[1]), key=lambda h: h.ts)
+    work = sorted((h for h in hours if allowed(h.ts)), key=lambda h: h.ts)
     out = SitePlan(without=sum(h.person_exposure for h in work), without_15=sum(h.person_exposure_15 for h in work))
     days = defaultdict(list)
     for h in work:

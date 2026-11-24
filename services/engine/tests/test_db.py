@@ -633,7 +633,7 @@ def test_run_stores_exposure_avoided_per_site_and_for_the_ward(conn, settings):
         """select site_id, without_plan, with_plan, avoided, avoided_pct, without_15, with_15, avoided_15, avoided_15_pct,
                   moved_hours, stuck_hours from exposure_avoided where run_id=%s""", (rid,)).fetchall()}
     assert sorted(rows) == list("ABCDEF")
-    allowed = "extract(hour from {} at time zone 'Asia/Kolkata') between 6 and 21"
+    allowed = "extract(epoch from ({} at time zone 'Asia/Kolkata')::time) / 3600 between 6 and 21"  # ends by 22:00
     # The 15 µg/m³ figure by hand from the exposures rows: people x µg/m³ added, over the hours 06:00-22:00 IST.
     by_hand = dict(conn.execute(
         f"""select s.id, coalesce(sum(r.population * e.conc::float8) filter (where {allowed.format('e.ts')}), 0)

@@ -183,9 +183,9 @@ export async function getPastExposure(days = 7): Promise<PastExposure> {
           and r.issued_at > now() - make_interval(days => $2 + 2) and r.issued_at < w.ts
           and w.ts > now() - make_interval(days => $2) and w.ts <= now()
         order by w.site_id, w.ts, r.issued_at desc, r.id desc)
-     select coalesce(sum(person_exposure) filter (where extract(hour from ts at time zone 'Asia/Kolkata') between 6 and 21), 0)::float as without,
+     select coalesce(sum(person_exposure) filter (where extract(epoch from (ts at time zone 'Asia/Kolkata')::time) / 3600 between 6 and 21), 0)::float as without,
             coalesce(sum(avoided), 0)::float as avoided,
-            coalesce(sum(person_exposure_15) filter (where extract(hour from ts at time zone 'Asia/Kolkata') between 6 and 21), 0)::float as without_15,
+            coalesce(sum(person_exposure_15) filter (where extract(epoch from (ts at time zone 'Asia/Kolkata')::time) / 3600 between 6 and 21), 0)::float as without_15,
             coalesce(sum(avoided_15), 0)::float as avoided_15, count(distinct ts)::int as hours from inforce`,
     [await ward(), days],
   );

@@ -11,13 +11,13 @@ from dusttrace.windows import SiteHour
 DAY = pd.Timestamp("2026-11-24T00:00Z")  # 05:30 IST
 
 
-def hour(ist: int, status: str, pe15: float, site: str = "A", day: int = 0, faint: float = 0.0) -> SiteHour:
+def hour(ist: float, status: str, pe15: float, site: str = "A", day: int = 0, faint: float = 0.0) -> SiteHour:
     """A site hour at `ist` o'clock IST: `pe15` person·µg/m³ at receptors given 15 µg/m³ or more, `faint` below that."""
     ts = DAY + pd.Timedelta(days=day, hours=ist - 5.5)
     return SiteHour(site, ts, [], 0.0, 0.0, status=status, person_exposure=pe15 + faint, person_exposure_15=pe15)
 
 
-def at(ist: int, day: int = 0) -> pd.Timestamp:
+def at(ist: float, day: int = 0) -> pd.Timestamp:
     return DAY + pd.Timedelta(days=day, hours=ist - 5.5)
 
 
@@ -77,6 +77,15 @@ def test_work_moves_within_the_allowed_hours_and_the_same_day_only():
     assert p.moves == {} and p.stuck == [at(6)]
     p = exposure.plan_site([hour(6, "avoid", 9_000), hour(21, "go", 0)])
     assert p.moves == {at(6): (at(21), 9_000, 9_000)}               # 06:00 work can go to 21:00 the same day
+
+
+def test_dusty_work_ends_by_22_00():
+    # The hour from 21:30 runs to 22:30, past the limit: no dusty work in it, and none moves into it.
+    p = exposure.plan_site([hour(9, "avoid", 9_000), hour(21.5, "go", 0)])
+    assert p.moves == {} and p.stuck == [at(9)]
+    assert exposure.plan_site([hour(21.5, "avoid", 9_000), hour(5.5, "avoid", 9_000)]).without == 0
+    p = exposure.plan_site([hour(9, "avoid", 9_000), hour(21, "go", 0)])  # 21:00-22:00 is the last allowed hour
+    assert p.moves == {at(9): (at(21), 9_000, 9_000)}
 
 
 def test_each_open_hour_takes_at_most_one_moved_hour():
