@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { q } from "./db";
 import { parseOutcome } from "./officer";
 import { planSecret, verifySite } from "./plan";
-import { candidateSite, parseCandidateVerdict } from "./sites";
+import { getReportedPlaces } from "./queries";
+import { parseReview } from "./report";
+import { candidateSite, parseCandidateVerdict, placeSite } from "./sites";
 
 // An officer approves or declines an action the policy engine proposed (route L1 or L2).
 // Only proposed actions can be decided; everything else the engine set stays as it is.
@@ -80,4 +82,46 @@ export async function decideCandidate(form: FormData): Promise<void> {
   }
   revalidatePath("/inspect");
   revalidatePath("/sites");
+}
+
+// An officer verifies or rejects a resident's report. On the next run a verified report counts toward its
+// site's Dust Score, and a rejected one stops counting toward the inspection priority.
+export async function reviewReport(form: FormData): Promise<void> {
+  const parsed = parseReview(form);
+  if (!parsed.ok) return;
+  await q("update citizen_reports set status=$2, reviewed_at=now() where id=$1 and status='new'", [parsed.value.id, parsed.value.verdict]);
+  revalidatePath("/resident-reports");
+  revalidatePath("/inspect");
+}
+
+// An officer confirms a place residents reported (F2) into a real site, as with a satellite candidate, or
+// rejects it. The page posts one of the place's reports; the place is grouped again from the reports as they
+// stand, so one that arrived after the page loaded goes with it. Confirming moves its reports to the new site;
+// rejecting rejects only the reports nobody has checked yet.
+export async function decidePlace(form: FormData): Promise<void> {
+  const parsed = parseCandidateVerdict(form);
+  if (!parsed.ok) return;
+  const { id, verdict } = parsed.value;
+  const [r] = await q<{ ward_id: string }>("select ward_id from citizen_reports where id=$1 and site_id is null", [id]);
+  const place = r && (await getReportedPlaces(r.ward_id)).find((p) => p.ids.includes(id));
+  if (!place) return;
+  if (verdict === "confirmed") {
+    const [near] = await q<{ name: string }>(
+      `select name from receptors where source='osm' and kind in ('school', 'hospital')
+          and st_dwithin(geom, st_setsrid(st_makepoint($2, $1), 4326)::geography, 500)
+        order by geom <-> st_setsrid(st_makepoint($2, $1), 4326)::geography limit 1`, [place.lat, place.lon]);
+    const s = placeSite(place, near?.name ?? null);
+    await q(
+      `insert into sites (id, name, activity, lat, lon, ward_id, sensor_status, demo, source)
+       values ($1, $2, $3, $4, $5, $6, 'not_connected', false, 'citizen') on conflict (id) do nothing`,
+      [s.id, s.name, s.activity, s.lat, s.lon, r.ward_id],
+    );
+    await q("update citizen_reports set site_id=$2 where id = any($1) and site_id is null", [place.ids, s.id]);
+  } else {
+    await q("update citizen_reports set status='rejected', reviewed_at=now() where id = any($1) and site_id is null and status='new'",
+      [place.ids]);
+  }
+  revalidatePath("/inspect");
+  revalidatePath("/sites");
+  revalidatePath("/resident-reports");
 }

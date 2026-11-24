@@ -1,6 +1,7 @@
 """Database integration tests. They need TEST_DATABASE_URL (Postgres + PostGIS) and skip without it."""
 
 import numpy as np
+import psycopg
 import pytest
 import pandas as pd
 
@@ -187,6 +188,46 @@ def test_run_scores_every_site_and_counts_citizen_reports(conn, settings):
     assert rows["D"][3]["trust"] == 0   # no monitor
     rank_c = one(conn, "select components->>'reports' from inspection_rank where run_id=%s and site_id='C'", (out["run_id"],))
     assert float(rank_c[0]) > 0
+
+
+def test_an_officer_verdict_moves_the_dust_score_and_the_priority(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    ids = [r[0] for r in conn.execute(
+        """insert into citizen_reports (site_id, ward_id, kind, lat, lon) values
+           ('C', 'K-East', 'dry_excavation', 19.11, 72.87), ('C', 'K-East', 'other', null, null) returning id""").fetchall()]
+    conn.commit()
+    score = lambda run: one(conn, "select inputs, components from dust_scores where run_id=%s and site_id='C'", (run["run_id"],))
+    priority = lambda run: float(one(conn, "select components->>'reports' from inspection_rank where run_id=%s and site_id='C'",
+                                     (run["run_id"],))[0])
+    before = pipeline.run(conn, settings)
+    assert score(before)[0]["verified_reports"] == 0 and score(before)[1]["reports"] == 15
+    conn.execute("update citizen_reports set status='verified' where id=%s", (ids[0],))
+    conn.execute("update citizen_reports set status='rejected' where id=%s", (ids[1],))
+    conn.commit()
+    after = pipeline.run(conn, settings)
+    assert score(after)[0]["verified_reports"] == 1 and score(after)[1]["reports"] == 10
+    assert priority(after) == pytest.approx(priority(before) / 2)  # two reports counted, now one
+
+
+def test_a_report_with_no_site_needs_a_place_and_its_photo_goes_with_it(conn):
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute("insert into citizen_reports (ward_id, kind) values ('K-East', 'other')")
+    conn.rollback()
+    rid = one(conn, """insert into citizen_reports (ward_id, kind, lat, lon, accuracy_m)
+                       values ('K-East', 'other', 19.11, 72.87, 12) returning id""")[0]
+    conn.execute("insert into report_photos (report_id, jpeg, width, height) values (%s, %s, 64, 48)", (rid, b"\xff\xd8\xff\xd9"))
+    conn.commit()
+    assert one(conn, "select label, label_confidence, label_model from report_photos where report_id=%s", (rid,)) == (None, None, None)
+    assert "C" in db.site_signals(conn, "K-East")
+    conn.execute("delete from citizen_reports where id=%s", (rid,))
+    assert one(conn, "select count(*) from report_photos")[0] == 0
+
+
+def test_older_reports_get_their_site_s_ward(conn):
+    conn.execute("insert into citizen_reports (site_id, kind) values ('C', 'other')")
+    conn.commit()
+    db.migrate(conn)
+    assert one(conn, "select ward_id from citizen_reports where site_id='C'")[0] == "K-East"
 
 
 def test_accepted_plans_count_as_windows_followed(conn, settings):

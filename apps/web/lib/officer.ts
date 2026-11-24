@@ -2,7 +2,7 @@
 
 export interface Point { lat: number; lon: number }
 
-const metres = (a: Point, b: Point) => {
+export const metres = (a: Point, b: Point) => {
   const dy = (a.lat - b.lat) * 111_320;
   const dx = (a.lon - b.lon) * 111_320 * Math.cos((a.lat * Math.PI) / 180);
   return Math.hypot(dx, dy);

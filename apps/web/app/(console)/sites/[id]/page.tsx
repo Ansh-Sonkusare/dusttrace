@@ -34,7 +34,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
         <div>
           <p className="small"><Link href="/sites" className="muted">Sites</Link></p>
           <h1>{siteLabel(site.id, site.name)}</h1>
-          <p className="lede">{ACTIVITY_LABEL[site.activity] ?? site.activity}, about {Math.round(site.area_m2).toLocaleString("en-IN")} m² active{site.developer ? `, ${site.developer}` : ""}.{site.demo ? " Demo site for the prototype." : site.source === "osm" ? " Mapped in OpenStreetMap; its monitor feed is not connected yet." : site.source === "satellite" ? " Found from Sentinel-2 and confirmed by an officer; its monitor feed is not connected yet." : ""}</p>
+          <p className="lede">{ACTIVITY_LABEL[site.activity] ?? site.activity}, about {Math.round(site.area_m2).toLocaleString("en-IN")} m² active{site.developer ? `, ${site.developer}` : ""}.{site.demo ? " Demo site for the prototype." : site.source === "osm" ? " Mapped in OpenStreetMap; its monitor feed is not connected yet." : site.source === "satellite" ? " Found from Sentinel-2 and confirmed by an officer; its monitor feed is not connected yet." : site.source === "citizen" ? " Reported by residents and confirmed by an officer. Its size is not measured yet, so it is planned at the default area; its monitor feed is not connected." : ""}</p>
         </div>
         <section className="panel">
           <div className="ph"><h2>Next 48 hours</h2><span className="meta">Hover a cell for the reason</span></div>

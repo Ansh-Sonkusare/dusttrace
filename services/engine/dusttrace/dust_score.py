@@ -19,6 +19,7 @@ class Score:
     band: str
     components: dict = field(default_factory=dict)  # points earned per part
     notes: list[str] = field(default_factory=list)
+    inputs: dict = field(default_factory=dict)      # what the parts were computed from
 
 
 def band(score: float) -> str:
@@ -46,4 +47,6 @@ def compute(trust: float | None, has_sensor: bool, spike_hours: int, windows_fol
         notes.append("Safe-Work Windows followed: not reported yet, counted as half.")
     points = {k: round(WEIGHTS[k] * v, 1) for k, v in parts.items()}
     total = round(max(0.0, min(100.0, sum(points.values()))), 1)
-    return Score(total, band(total), points, notes)
+    inputs = {"trust": trust, "has_sensor": has_sensor, "sensor_known": sensor_known, "spike_hours": spike_hours,
+              "windows_followed": windows_followed, "verified_reports": verified_reports, "violations": violations}
+    return Score(total, band(total), points, notes, inputs)
