@@ -39,7 +39,8 @@ class Result:
 
 
 def metrics(rows: pd.DataFrame, threshold: float) -> dict:
-    """`rows`: h, pred, lo, hi, p, actual, persist (ward level)."""
+    """`rows`: h, pred, lo, hi, p, actual, persist (ward level). Scores stay unrounded, here and in daily_metrics:
+    the input decision compares them, and the console rounds them for display."""
     out = {}
     for name, (a, b) in BUCKETS.items():
         r = rows[(rows["h"] >= a) & (rows["h"] <= b)]
@@ -48,12 +49,12 @@ def metrics(rows: pd.DataFrame, threshold: float) -> dict:
         ex = r["actual"] > threshold
         out[name] = {
             "n": int(len(r)),
-            "mae_model": round(float((r["pred"] - r["actual"]).abs().mean()), 2),
-            "mae_persistence": round(float((r["persist"] - r["actual"]).abs().mean()), 2),
+            "mae_model": float((r["pred"] - r["actual"]).abs().mean()),
+            "mae_persistence": float((r["persist"] - r["actual"]).abs().mean()),
             "f1_exceed_model": _f1(ex, r["p"] >= 0.5),
             "f1_exceed_persistence": _f1(ex, r["persist"] > threshold),
-            "coverage_10_90": round(float(((r["actual"] >= r["lo"]) & (r["actual"] <= r["hi"])).mean()), 3),
-            "exceed_rate": round(float(ex.mean()), 3),
+            "coverage_10_90": float(((r["actual"] >= r["lo"]) & (r["actual"] <= r["hi"])).mean()),
+            "exceed_rate": float(ex.mean()),
         }
     return out
 
@@ -63,7 +64,7 @@ def _f1(truth, call) -> float | None:
     truth, call = np.asarray(truth, dtype=bool), np.asarray(call, dtype=bool)
     if not truth.any() and not call.any():
         return None
-    return round(float(f1_score(truth, call, zero_division=0)), 3)
+    return float(f1_score(truth, call, zero_division=0))
 
 
 def daily_metrics(rows: pd.DataFrame, threshold: float) -> dict:
@@ -83,7 +84,7 @@ def daily_metrics(rows: pd.DataFrame, threshold: float) -> dict:
                 "false_alarms": int((~ex & call).sum()),
                 "f1_model": _f1(ex, call),
                 "f1_persistence": _f1(ex, r["persist"] > threshold),
-                "brier": round(float(((r["p"] - ex) ** 2).mean()), 4),
+                "brier": float(((r["p"] - ex) ** 2).mean()),
             }
     seen = rows.drop_duplicates(["station_id", "end"])
     w, s = seen[seen["level"] == "ward"], seen[seen["level"] == "stations"]

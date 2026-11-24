@@ -205,6 +205,20 @@ def test_an_input_stays_on_only_if_it_does_not_make_the_backtest_worse():
     assert backtest.change(hourly, daily, hourly, daily)["on"] is True  # no change is not worse
 
 
+def test_the_decision_reads_unrounded_scores():
+    # One extra false alarm in each of 3,200 hours: F1 falls by 0.0004, which 3 decimals would hide.
+    def rows(extra_fp):
+        calls = [(150.0, 0.9)] * 1000 + [(150.0, 0.1)] * 100 + [(50.0, 0.9)] * (100 + extra_fp) + [(50.0, 0.1)] * 2000
+        return pd.DataFrame([{"h": h, "pred": a, "lo": 0.0, "hi": 999.0, "p": p, "actual": a, "persist": a}
+                             for h in (1, 30, 60) for a, p in calls])
+    base, more = backtest.metrics(rows(0), 100.0), backtest.metrics(rows(1), 100.0)
+    daily = {"stations": {"1": {"f1_model": 0.5}}}
+    c = backtest.change(base, daily, more, daily)
+    assert c["on"] is False and c["f1_hourly"] == pytest.approx(-0.0004, abs=5e-5)
+    worse = {k: {**b, "mae_model": b["mae_model"] + 0.004} for k, b in base.items()}  # under 2 decimals
+    assert backtest.change(base, daily, worse, daily)["on"] is False
+
+
 def test_a_change_too_small_to_show_still_decides():
     # Real K-East, Sep-Oct window: festival cut the error but lost 0.0003 of hourly F1, which rounds to 0.000.
     daily = {"stations": {d: {"f1_model": 0.9} for d in ("1", "2", "3")}}
