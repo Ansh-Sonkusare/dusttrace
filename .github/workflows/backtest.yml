@@ -13,13 +13,13 @@ on:
         description: "K-East or P-North"
         default: "K-East"
       kind:
-        description: "standard, outage (verify the CAMS fill) or cams (with vs without the CAMS features)"
+        description: "standard, outage (verify the CAMS fill), cams (with vs without the CAMS features) or inputs (festival and upwind sites; runs follow it)"
         default: "standard"
 
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       DUSTTRACE_WARD: ${{ inputs.ward || 'K-East' }}
@@ -34,9 +34,11 @@ jobs:
           cache: pip
       - run: pip install -e .
       - run: python -m dusttrace init-db
-      - if: ${{ inputs.kind != 'outage' && inputs.kind != 'cams' }}
+      - if: ${{ inputs.kind != 'outage' && inputs.kind != 'cams' && inputs.kind != 'inputs' }}
         run: python -m dusttrace backtest --days "${{ inputs.days || '60' }}"
       - if: ${{ inputs.kind == 'cams' }}
         run: python -m dusttrace backtest --compare-cams --days "${{ inputs.days || '30' }}"
+      - if: ${{ inputs.kind == 'inputs' }}
+        run: python -m dusttrace backtest --compare-inputs --days "${{ inputs.days || '60' }}"
       - if: ${{ inputs.kind == 'outage' }}
         run: python -m dusttrace replay-outage --days "${{ inputs.days || '30' }}"

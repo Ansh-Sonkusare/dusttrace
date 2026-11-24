@@ -4,6 +4,10 @@ The model is trained on readings before `start` only. For each origin from `star
 next `horizon` hours from readings up to that origin, and the forecast is scored against what the
 stations then measured, alongside persistence (the value at the origin carried forward).
 
+The daily calls, P(24 h mean PM10 > 100) for days 1-3 after each origin, are scored against the 24 h means
+the stations measured (18 of 24 hours or the day is skipped), for the ward and for each station, alongside
+persistence: the 24 h mean measured up to the origin, carried forward.
+
 One honest caveat: the weather at the target hour is the observed weather (Open-Meteo archive), so
 this treats the weather forecast as perfect. Live forecasts will do somewhat worse.
 """
@@ -18,7 +22,7 @@ from sklearn.metrics import f1_score
 
 from . import fill, forecast
 
-BUCKETS = {"1-24": (1, 24), "25-48": (25, 48)}
+BUCKETS = {"1-24": (1, 24), "25-48": (25, 48), "49-72": (49, 72)}
 IST = pd.Timedelta(hours=5.5)
 
 
@@ -30,11 +34,13 @@ class Result:
     stations: list[str]
     metrics: dict
     spike_day: dict | None
+    daily: dict = None
     note: str = "Weather at the target hour is observed weather, i.e. a perfect weather forecast."
 
 
 def metrics(rows: pd.DataFrame, threshold: float) -> dict:
-    """`rows`: h, pred, lo, hi, p, actual, persist (ward level)."""
+    """`rows`: h, pred, lo, hi, p, actual, persist (ward level). Scores stay unrounded, here and in daily_metrics:
+    the input decision compares them, and the console rounds them for display."""
     out = {}
     for name, (a, b) in BUCKETS.items():
         r = rows[(rows["h"] >= a) & (rows["h"] <= b)]
@@ -43,30 +49,92 @@ def metrics(rows: pd.DataFrame, threshold: float) -> dict:
         ex = r["actual"] > threshold
         out[name] = {
             "n": int(len(r)),
-            "mae_model": round(float((r["pred"] - r["actual"]).abs().mean()), 2),
-            "mae_persistence": round(float((r["persist"] - r["actual"]).abs().mean()), 2),
-            "f1_exceed_model": round(float(f1_score(ex, r["p"] >= 0.5, zero_division=0)), 3),
-            "f1_exceed_persistence": round(float(f1_score(ex, r["persist"] > threshold, zero_division=0)), 3),
-            "coverage_10_90": round(float(((r["actual"] >= r["lo"]) & (r["actual"] <= r["hi"])).mean()), 3),
-            "exceed_rate": round(float(ex.mean()), 3),
+            "mae_model": float((r["pred"] - r["actual"]).abs().mean()),
+            "mae_persistence": float((r["persist"] - r["actual"]).abs().mean()),
+            "f1_exceed_model": _f1(ex, r["p"] >= 0.5),
+            "f1_exceed_persistence": _f1(ex, r["persist"] > threshold),
+            "coverage_10_90": float(((r["actual"] >= r["lo"]) & (r["actual"] <= r["hi"])).mean()),
+            "exceed_rate": float(ex.mean()),
         }
     return out
+
+
+def _f1(truth, call) -> float | None:
+    """F1, or None when nothing was measured above the threshold and nothing was called."""
+    truth, call = np.asarray(truth, dtype=bool), np.asarray(call, dtype=bool)
+    if not truth.any() and not call.any():
+        return None
+    return float(f1_score(truth, call, zero_division=0))
+
+
+def daily_metrics(rows: pd.DataFrame, threshold: float) -> dict:
+    """`rows`: level ('ward' or 'stations'), station_id, day, end (the day's last hour), p, actual and persist
+    (24 h means). `window` counts each measured 24 h once, though days 1-3 of successive forecasts score it
+    up to three times."""
+    out = {}
+    for level, g in rows.groupby("level"):
+        out[level] = {}
+        for day, r in g.groupby("day"):
+            ex, call = (r["actual"] > threshold).to_numpy(), (r["p"] >= 0.5).to_numpy()
+            out[level][str(day)] = {
+                "n": int(len(r)),
+                "exceed_days": int(ex.sum()),
+                "hits": int((ex & call).sum()),
+                "misses": int((ex & ~call).sum()),
+                "false_alarms": int((~ex & call).sum()),
+                "f1_model": _f1(ex, call),
+                "f1_persistence": _f1(ex, r["persist"] > threshold),
+                "brier": float(((r["p"] - ex) ** 2).mean()),
+            }
+    seen = rows.drop_duplicates(["station_id", "end"])
+    w, s = seen[seen["level"] == "ward"], seen[seen["level"] == "stations"]
+    out["window"] = {"ward_days": int(len(w)), "ward_exceed_days": int((w["actual"] > threshold).sum()),
+                     "station_days": int(len(s)), "station_exceed_days": int((s["actual"] > threshold).sum())}
+    return out
+
+
+def change(base_hourly: dict, base_daily: dict, hourly: dict, daily: dict) -> dict:
+    """What adding an input did to the back-test, and whether it stays on: only if the hourly MAE does not
+    rise and neither the hourly nor the daily exceedance F1 falls (each the mean over its horizons). The
+    decision uses the unrounded means; a blank F1 (nothing to catch, nothing called) counts as perfect, so
+    false alarms in a quiet window count against the input."""
+    def summary(h, d):
+        mean = lambda xs: float(np.mean(xs)) if xs else 0.0
+        f1 = lambda v: 1.0 if v is None else v
+        return (mean([h[k]["mae_model"] for k in BUCKETS if k in h]),
+                mean([f1(h[k]["f1_exceed_model"]) for k in BUCKETS if k in h]),
+                mean([f1(v["f1_model"]) for v in d.get("stations", {}).values()]))
+    (m0, h0, d0), (m1, h1, d1) = summary(base_hourly, base_daily), summary(hourly, daily)
+    tol = 1e-9  # float noise only
+    return {"mae": round(m1 - m0, 4), "f1_hourly": round(h1 - h0, 4), "f1_daily": round(d1 - d0, 4),
+            "on": m1 - m0 <= tol and h1 - h0 >= -tol and d1 - d0 >= -tol}
 
 
 def _ward_actual(readings: pd.DataFrame) -> pd.Series:
     return readings.dropna(subset=["pm10"]).groupby("ts")["pm10"].mean()
 
 
+def _means_24(series: pd.Series) -> pd.Series:
+    """At each hour e, the mean of hours e-23 .. e when at least 18 were measured."""
+    idx = pd.date_range(series.index.min(), series.index.max(), freq="h", tz="UTC")
+    return series.reindex(idx).rolling(24, min_periods=forecast.MIN_HOURS).mean()
+
+
 def run(readings: pd.DataFrame, wx: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp,
-        horizon: int = 48, step_h: int = 24, threshold: float = 100.0, cams: pd.DataFrame | None = None) -> Result:
+        horizon: int = 72, step_h: int = 24, threshold: float = 100.0, cams: pd.DataFrame | None = None,
+        festival: bool = False, upwind: dict | None = None) -> Result:
     readings = readings.copy()
     readings["ts"] = pd.to_datetime(readings["ts"], utc=True)
-    model = forecast.train(readings[readings["ts"] < start], wx, horizon, threshold, cams=cams)
+    model = forecast.train(readings[readings["ts"] < start], wx, horizon, threshold, cams=cams, festival=festival,
+                           upwind=upwind)
     actual = _ward_actual(readings)
+    means = {sid: _means_24(g.set_index("ts")["pm10"].dropna()) for sid, g in readings.groupby("station_id")}
+    means["ward"] = _means_24(actual)
     origins = pd.date_range(start, end - pd.Timedelta(hours=horizon), freq=f"{step_h}h", tz="UTC")
-    rows, issued = [], {}
+    rows, drows, issued = [], [], {}
     for t0 in origins:
-        fc = forecast.predict(model, readings[readings["ts"] <= t0], wx, t0, horizon, cams=cams)
+        seen = readings[readings["ts"] <= t0]
+        fc = forecast.predict(model, seen, wx, t0, horizon, cams=cams)
         ward = fc[fc["station_id"] == "ward"].set_index("ts")
         if ward.empty or t0 not in actual.index:
             continue
@@ -76,9 +144,15 @@ def run(readings: pd.DataFrame, wx: pd.DataFrame, start: pd.Timestamp, end: pd.T
                 rows.append({"t0": t0, "ts": ts, "h": int((ts - t0) / pd.Timedelta(hours=1)), "pred": w["pm10"],
                              "lo": w["pm10_lo"], "hi": w["pm10_hi"], "p": w["p_exceed"],
                              "actual": actual[ts], "persist": actual[t0]})
+        for d in forecast.predict_daily(model, seen, wx, t0, cams=cams).itertuples():
+            m = means[d.station_id]
+            drows.append({"level": "ward" if d.station_id == "ward" else "stations", "station_id": d.station_id,
+                          "day": d.day, "end": d.ends_at, "p": d.p_exceed,
+                          "actual": m.get(d.ends_at, np.nan), "persist": m.get(t0, np.nan)})
     df = pd.DataFrame(rows)
+    ddf = pd.DataFrame(drows).dropna(subset=["actual", "persist"]) if drows else pd.DataFrame()
     return Result(start, end, len(issued), sorted(model.station_codes), metrics(df, threshold) if len(df) else {},
-                  _spike_day(actual, issued, start, end, horizon))
+                  _spike_day(actual, issued, start, end, horizon), daily_metrics(ddf, threshold) if len(ddf) else {})
 
 
 def _spike_day(actual: pd.Series, issued: dict, start, end, horizon) -> dict | None:

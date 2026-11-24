@@ -7,8 +7,8 @@
   node-add  provision a DustTrace Node (--id --name --host-kind --lat --lon [--receptor | --site]) and print its key once
   osm-housing  estimated housing exposure: Census 2011 people over OSM residential land (needs network)
   ingest    load weather + readings (--mode auto|live|synthetic, --days N)
-  run       train, forecast 48 h, plumes, Safe-Work Windows
-  backtest  replay the last N days with only past data visible (--days N)
+  run       train, forecast 72 h (and P(24 h mean > 100) for days 1-3), 48 h of plumes and Safe-Work Windows
+  backtest  replay the last N days with only past data visible (--days N; --compare-inputs tries each new input)
   discover  Sentinel-2 change detection: possible unregistered sites (needs network)
   replay-outage  verify the CAMS fill: hide 4 days before each forecast and score it (--days N)
   verify    data check: how much of the latest run is real; stores data_checks
@@ -61,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     ro.add_argument("--days", type=int, default=30)
     bt = sub.add_parser("backtest")
     bt.add_argument("--compare-cams", action="store_true", help="same window with and without the CAMS features (#32)")
+    bt.add_argument("--compare-inputs", action="store_true",
+                    help="same window with and without the festival calendar and upwind sites (#55); runs follow it")
     bt.add_argument("--days", type=int, default=60)
     al = sub.add_parser("all")
     al.add_argument("--mode", choices=["auto", "live", "synthetic"], default="auto")
@@ -115,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "backtest":
             if args.compare_cams:
                 print("cams feature:", json.dumps(pipeline.compare_cams(conn, settings, args.days), indent=2, default=str))
+            elif args.compare_inputs:
+                print("inputs:", json.dumps(pipeline.compare_inputs(conn, settings, args.days), indent=2, default=str))
             else:
                 print("backtest:", json.dumps(pipeline.backtest(conn, settings, args.days), indent=2, default=str))
         if args.cmd in ("run", "all"):
