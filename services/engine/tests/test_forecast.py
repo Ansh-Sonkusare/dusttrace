@@ -61,14 +61,17 @@ def test_hours_past_the_weather_forecast_are_not_forecast(year, model):
     assert forecast.predict_daily(model, rd, almost, END)["day"].tolist() == [1, 2, 3] * 3  # 22 of 24 hours is enough
 
 
-def test_training_rows_past_48_hours_come_from_every_second_origin(year):
+def test_hours_1_to_48_are_forecast_exactly_as_the_48_hour_model_does(year, model, up):
+    # Safe-Work Windows and rule D2 read hours 1-48: reaching 72 h must not change them.
     rd, wx = year
-    rows = forecast.build_rows(rd, wx, None, 72, {"s1": 0, "s2": 1}, with_target=False)
-    per_h = rows.groupby("h")["t0"].nunique()
-    assert per_h[49] == pytest.approx(per_h[48] / 2, abs=1) and per_h[72] == per_h[49]
-    assert set(rows.loc[rows["h"] == 49, "t0"]) <= set(rows.loc[rows["h"] == 48, "t0"])
-    one = forecast.build_rows(rd, wx, pd.DatetimeIndex([END]), 72, {"s1": 0}, with_target=False)
-    assert sorted(one["h"]) == list(range(1, 73))  # a forecast still covers every hour
+    m48 = forecast.train(rd[rd["ts"] < END - pd.Timedelta(days=20)], wx, horizon=48, festival=True, upwind=up)
+    t0 = END - pd.Timedelta(days=8)
+    long, short = forecast.predict(model, rd, wx, t0, 72), forecast.predict(m48, rd, wx, t0, 48)
+    near = long[long["ts"] <= t0 + pd.Timedelta(hours=48)]
+    key = ["station_id", "ts"]
+    pd.testing.assert_frame_equal(near.sort_values(key).reset_index(drop=True), short.sort_values(key).reset_index(drop=True))
+    assert {k: model.metrics[k] for k in m48.metrics} == m48.metrics  # the held-out scores are the 48 h model's
+    assert len(long[long["station_id"] == "ward"]) == 72
 
 
 def test_daily_target_is_the_mean_of_the_24_hours_after_the_origin(year):

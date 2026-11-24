@@ -2,7 +2,8 @@
 
 Direct multi-horizon LightGBM: each training row is (origin t0, horizon h) with features known at t0
 (recent PM10 lags) and weather at the target hour t0+h (from the weather forecast in production).
-We fit a median model, 10th/90th percentile models for the range, and a classifier for P(PM10 > 100).
+We fit a median model, 10th/90th percentile models for the range, and a classifier for P(PM10 > 100):
+one set for hours 1-48, exactly as the 48 h forecast had it, and a second set for hours 49-72.
 
 The PRD's own quantity, P(24 h mean PM10 > 100) for days 1-3 after t0 (hours 1-24, 25-48, 49-72), comes from
 a second classifier trained on daily rows: features known at t0, weather averaged over the day's 24 h, and
@@ -42,7 +43,8 @@ DAILY_FEATURES = (
 )
 DAILY_OPTIONAL = ["cams_mean_24", "festival", "upwind_sites_ha"]  # averaged over the day's 24 h when the model has them
 MIN_HOURS = 18  # a 24 h mean needs 18 of its 24 hours measured
-THIN_AFTER_H = 48  # training rows past this horizon come from every second origin, so 72 h costs about 1.25x 48 h
+NEAR_H = 48  # hours 1-48 keep the 48 h model as it was: Safe-Work Windows and rule D2 read them
+FAR_STRIDE = 5  # hours past NEAR_H come from a second model, trained on origins every 5 h (every hour of day in 5 days)
 UPWIND_RADIUS_M = 3000
 UPWIND_HALF_WIDTH = 30  # degrees either side of the direction the wind blows from
 IST = 5.5
@@ -98,7 +100,7 @@ def _origin_features(pm: pd.Series, t0s: pd.DatetimeIndex) -> pd.DataFrame:
 def build_rows(readings: pd.DataFrame, wx: pd.DataFrame, origins: pd.DatetimeIndex | None,
                horizon: int, station_codes: dict[str, int], with_target: bool = True,
                origin_stride: int = 3, cams: pd.DataFrame | None = None, festival: bool = False,
-               upwind: dict[str, np.ndarray] | None = None) -> pd.DataFrame:
+               upwind: dict[str, np.ndarray] | None = None, first_h: int = 1) -> pd.DataFrame:
     w = _prep_weather(wx)
     idx = pd.date_range(w.index.min(), w.index.max(), freq="h", tz="UTC")
     fest = pd.Series(festivals.flag(idx), index=idx) if festival else None
@@ -112,13 +114,11 @@ def build_rows(readings: pd.DataFrame, wx: pd.DataFrame, origins: pd.DatetimeInd
             up = _upwind_hourly(upwind[sid], w["wind_dir"].reindex(idx))
         t0s = origins if origins is not None else idx[24:-1:origin_stride]
         base = _origin_features(pm, t0s)
-        for h in range(1, horizon + 1):
-            thin = origins is None and h > THIN_AFTER_H
-            at = t0s[::2] if thin else t0s
-            tgt = at + pd.Timedelta(hours=h)
-            df = base.iloc[::2].copy() if thin else base.copy()
+        for h in range(first_h, horizon + 1):
+            tgt = t0s + pd.Timedelta(hours=h)
+            df = base.copy()
             df["h"] = h
-            df["t0"] = at
+            df["t0"] = t0s
             df["ts"] = tgt
             df["station_id"] = sid
             df["station_code"] = code
@@ -220,6 +220,7 @@ class Model:
     daily: lgb.LGBMClassifier = None  # P(24 h mean PM10 > threshold) for days 1-3
     daily_features: list = None
     upwind: dict = None  # the upwind_site_area tables it was trained with
+    far: tuple = None  # (median, lo, hi, exceed) for hours past NEAR_H
 
     def __post_init__(self):
         if self.features is None:
@@ -242,7 +243,8 @@ def train(readings: pd.DataFrame, wx: pd.DataFrame, horizon: int = 72, threshold
           holdout_frac: float = 0.2, cams: pd.DataFrame | None = None, festival: bool = False,
           upwind: dict[str, np.ndarray] | None = None) -> Model:
     codes = {sid: i for i, sid in enumerate(sorted(readings["station_id"].unique()))}
-    data = build_rows(readings, wx, None, horizon, codes, cams=cams, festival=festival, upwind=upwind)
+    inputs = dict(cams=cams, festival=festival, upwind=upwind)
+    data = build_rows(readings, wx, None, min(horizon, NEAR_H), codes, **inputs)
     feats = (list(FEATURES) + (CAMS_FEATURES if cams is not None else []) + (FESTIVAL_FEATURES if festival else [])
              + (UPWIND_FEATURES if upwind is not None else []))
     if len(data) < 500:
@@ -276,12 +278,15 @@ def train(readings: pd.DataFrame, wx: pd.DataFrame, horizon: int = 72, threshold
     }
     # Refit on everything for the production forecast.
     m, lo, hi, clf = fit_all(data)
-    days = daily_rows(readings, wx, None, codes, cams=cams, festival=festival, upwind=upwind)
+    far = None
+    if horizon > NEAR_H:  # no held-out split: the scores above are the 48 h model's, as before
+        far = fit_all(build_rows(readings, wx, None, horizon, codes, origin_stride=FAR_STRIDE, first_h=NEAR_H + 1, **inputs))
+    days = daily_rows(readings, wx, None, codes, **inputs)
     dfeats = DAILY_FEATURES + [c for c in DAILY_OPTIONAL if c in feats]
     daily = _clf().fit(days[dfeats], (days["y"] > threshold).astype(int))
     metrics["daily_rows"] = int(len(days))
     metrics["daily_exceed_rate"] = round(float((days["y"] > threshold).mean()), 3)
-    return Model(m, lo, hi, clf, codes, threshold, metrics, feats, daily, dfeats, upwind)
+    return Model(m, lo, hi, clf, codes, threshold, metrics, feats, daily, dfeats, upwind, far)
 
 
 def predict(model: Model, readings: pd.DataFrame, wx: pd.DataFrame, t0: pd.Timestamp,
@@ -296,12 +301,17 @@ def predict(model: Model, readings: pd.DataFrame, wx: pd.DataFrame, t0: pd.Times
     if rows.empty:
         return pd.DataFrame(columns=["station_id", "ts", "pm10", "pm10_lo", "pm10_hi", "p_exceed"])
     X = rows[model.features]
-    rows["pm10"] = np.clip(model.median.predict(X), 0, None)
-    lo = model.lo.predict(X)
-    hi = model.hi.predict(X)
+    pm10, lo, hi, p = (np.zeros(len(rows)) for _ in range(4))
+    far = (rows["h"] > NEAR_H).to_numpy() if model.far else np.zeros(len(rows), dtype=bool)
+    heads = [(~far, (model.median, model.lo, model.hi, model.exceed))] + ([(far, model.far)] if model.far else [])
+    for sel, (m, l, u, c) in heads:
+        if sel.any():
+            pm10[sel], lo[sel], hi[sel] = m.predict(X[sel]), l.predict(X[sel]), u.predict(X[sel])
+            p[sel] = c.predict_proba(X[sel])[:, 1]
+    rows["pm10"] = np.clip(pm10, 0, None)
     rows["pm10_lo"] = np.clip(np.minimum(lo, rows["pm10"]), 0, None)
     rows["pm10_hi"] = np.maximum(hi, rows["pm10"])
-    rows["p_exceed"] = model.exceed.predict_proba(X)[:, 1]
+    rows["p_exceed"] = p
     st = rows[["station_id", "ts", "pm10", "pm10_lo", "pm10_hi", "p_exceed"]]
     ward = st.groupby("ts", as_index=False).agg(
         pm10=("pm10", "mean"), pm10_lo=("pm10_lo", "mean"), pm10_hi=("pm10_hi", "mean"),
