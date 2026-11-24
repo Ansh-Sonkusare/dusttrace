@@ -10,9 +10,12 @@ const pct = (p: number) => `${Math.round(p * 100)}%`;
 // The first and last forecast hour of the day, in IST.
 export const dayHours = (d: DayRow) => `${dayHour(d.starts_at)} to ${dayHour(d.ends_at)}`;
 
-export function wardDays(rows: DayRow[]) {
+// A day's last hour, but never past the last hour the run forecast (the weather forecast can stop first).
+export const lastHour = (d: DayRow, last?: string) => (last && last < d.ends_at ? last : d.ends_at);
+
+export function wardDays(rows: DayRow[], last?: string) {
   return rows.filter((r) => r.station_id === "ward").sort((a, b) => a.day - b.day)
-    .map((d) => ({ day: d.day, label: LABEL[d.day - 1], chance: pct(d.p_exceed), hours: dayHours(d) }));
+    .map((d) => ({ day: d.day, label: LABEL[d.day - 1], chance: pct(d.p_exceed), hours: dayHours({ ...d, ends_at: lastHour(d, last) }) }));
 }
 
 export function stationDays(rows: DayRow[]): Map<string, string[]> {
@@ -38,16 +41,52 @@ export function weatherNote(weatherHours: number | undefined, forecastHours: num
 }
 
 type DayScore = { f1_model: number | null; f1_persistence: number | null };
-const and = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+type HourScore = { mae_model: number; mae_persistence: number; f1_exceed_model: number | null; f1_exceed_persistence: number | null };
+export interface PersistenceWin { scope: string; measure: string; model: number; persistence: number }
 
-// One plain sentence when persistence (the last 24 h mean carried forward) beat the model's ward calls.
-export function persistenceNote(ward: Record<string, DayScore> | undefined): string | null {
-  const worse = Object.entries(ward ?? {}).filter(([, d]) => d.f1_model != null && d.f1_persistence != null && d.f1_model < d.f1_persistence)
-    .sort(([a], [b]) => Number(a) - Number(b));
-  if (!worse.length) return null;
-  const f = (v: number | null) => (v ?? 0).toFixed(2);
-  return `Persistence called the ward's days above 100 better than the model on ${worse.length === 1 ? "day" : "days"} ${and(worse.map(([k]) => k))}`
-    + ` (F1 ${and(worse.map(([, d]) => f(d.f1_persistence)))}, against ${and(worse.map(([, d]) => f(d.f1_model)))}).`;
+const and = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+// Rounded to `d` decimals, or one more when that would make the two look equal.
+const pair = (model: number, persistence: number, d: number) => {
+  const k = model.toFixed(d) === persistence.toFixed(d) ? d + 1 : d;
+  return { model: Number(model.toFixed(k)), persistence: Number(persistence.toFixed(k)) };
+};
+const MAE = "mean error, µg/m³", F1H = "F1, hours above 100", F1D = "F1, 24 h mean above 100";
+
+// Where persistence (the last value, or the last 24 h mean, carried forward) beat the model on a back-test:
+// lower error or higher exceedance F1 on an hourly bucket, or higher F1 on the ward's or stations' daily calls.
+export function persistenceWins(metrics: Record<string, HourScore>,
+                                daily?: { ward?: Record<string, DayScore>; stations?: Record<string, DayScore> } | null): PersistenceWin[] {
+  const out: PersistenceWin[] = [];
+  for (const [k, b] of Object.entries(metrics).sort(([a], [c]) => parseInt(a) - parseInt(c))) {
+    const scope = `hours ${k.replace("-", "–")}`;
+    if (b.mae_persistence < b.mae_model) out.push({ scope, measure: MAE, ...pair(b.mae_model, b.mae_persistence, 1) });
+    if (b.f1_exceed_model != null && b.f1_exceed_persistence != null && b.f1_exceed_persistence > b.f1_exceed_model) {
+      out.push({ scope, measure: F1H, ...pair(b.f1_exceed_model, b.f1_exceed_persistence, 2) });
+    }
+  }
+  for (const level of ["ward", "stations"] as const) {
+    for (const [k, d] of Object.entries(daily?.[level] ?? {}).sort(([a], [c]) => Number(a) - Number(c))) {
+      if (d.f1_model != null && d.f1_persistence != null && d.f1_persistence > d.f1_model) {
+        out.push({ scope: `${level}, day ${k}`, measure: F1D, ...pair(d.f1_model, d.f1_persistence, 2) });
+      }
+    }
+  }
+  return out;
+}
+
+const digits = (w: PersistenceWin) => Math.max(...[w.model, w.persistence].map((v) => (String(v).split(".")[1] ?? "").length),
+                                                w.measure === MAE ? 1 : 2);
+export function persistenceSentence(wins: PersistenceWin[]): string | null {
+  if (!wins.length) return null;
+  const parts = wins.map((w) => {
+    const [p, m] = [w.persistence, w.model].map((v) => v.toFixed(digits(w)));
+    if (w.measure === F1D) {
+      const [level, day] = w.scope.split(", day ");
+      return `on the ${level === "ward" ? "ward's" : "stations'"} day-${day} call (F1 ${p} against ${m})`;
+    }
+    return w.measure === MAE ? `at ${w.scope} on mean error (${p} against ${m} µg/m³)` : `at ${w.scope} on F1 for hours above 100 (${p} against ${m})`;
+  });
+  return `Persistence beat the model ${and(parts)}.`;
 }
 
 export interface InputChange { mae: number; f1_hourly: number; f1_daily: number; on: boolean }

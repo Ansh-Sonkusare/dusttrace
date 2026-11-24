@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { getForecastDays, getLatestRun, getWard, getWardForecast } from "@/lib/queries";
+import { getForecastDays, getLatestBacktest, getLatestRun, getWard, getWardForecast } from "@/lib/queries";
 import { publicForecast } from "@/lib/publicApi";
 import { guard, ok } from "@/lib/publicGuard";
 
@@ -12,6 +12,6 @@ export async function GET(request: NextRequest) {
   if (limited) return limited;
   const [ward, run] = await Promise.all([getWard(), getLatestRun()]);
   if (!ward || !run) return NextResponse.json({ error: "No forecast yet." }, { status: 404 });
-  const [hours, days] = await Promise.all([getWardForecast(run.id), getForecastDays(run.id)]);
-  return ok(publicForecast(run, hours, ward.name, days));
+  const [hours, days, bt] = await Promise.all([getWardForecast(run.id), getForecastDays(run.id), getLatestBacktest()]);
+  return ok(publicForecast(run, hours, ward.name, days, bt));
 }

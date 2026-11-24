@@ -311,11 +311,11 @@ export async function getLatestBacktest(kind: "standard" | "outage_replay" = "st
 export interface InputTrial { id: number; created_at: string; data_mode: string; origins: number; train_end: string; test_end: string;
   change: Partial<Record<string, InputChange>>; note: string | null }
 
-// The latest trial of the forecast's new inputs (`backtest --compare-inputs`, issue #55).
+// The trial runs follow: the latest on real data (`backtest --compare-inputs`, issue #55), else the latest of any kind.
 export async function getInputTrial(): Promise<InputTrial | null> {
   const r = await q<InputTrial>(
     `select id, created_at, data_mode, origins, train_end, test_end, coalesce(metrics->'change', '{}'::jsonb) as change, note
-       from backtests where ward_id=$1 and kind='inputs' order by created_at desc limit 1`, [await ward()]);
+       from backtests where ward_id=$1 and kind='inputs' order by data_mode = 'live' desc, created_at desc limit 1`, [await ward()]);
   return r[0] ? { ...r[0], created_at: iso(r[0].created_at), train_end: iso(r[0].train_end), test_end: iso(r[0].test_end) } : null;
 }
 

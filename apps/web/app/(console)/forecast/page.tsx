@@ -4,7 +4,7 @@ import NoRun from "@/components/Empty";
 import { getForecastDays, getInputTrial, getLatestBacktest, getLatestRun, getObserved, getStationPeaks, getWard, getWardForecast } from "@/lib/queries";
 import type { BtDay } from "@/lib/queries";
 import { dayHour, dayShort } from "@/lib/format";
-import { inputTrials, persistenceNote, stationDays, wardDays, weatherNote } from "@/lib/forecastDays";
+import { inputTrials, persistenceSentence, persistenceWins, stationDays, wardDays, weatherNote } from "@/lib/forecastDays";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +15,12 @@ export default async function ForecastPage() {
   if (!ward || !run) return (<><TopBar ward={ward} run={run} /><main className="view"><NoRun /></main></>);
   const [fc, obs, peaks, bt, replay, days, trial] = await Promise.all([getWardForecast(run.id), getObserved(run.issued_at, run.metrics.stations), getStationPeaks(run.id), getLatestBacktest(), getLatestBacktest("outage_replay"), getForecastDays(run.id), getInputTrial()]);
   const m = run.metrics;
-  const ward3 = wardDays(days);
+  const ward3 = wardDays(days, fc[fc.length - 1]?.ts);
   const stops = weatherNote(m.weather_hours, m.forecast_hours ?? 72);
   const perStation = stationDays(days);
   const trials = inputTrials(trial?.change ?? {}, m.forecast_inputs, trial?.data_mode);
   const daily = bt?.daily;
-  const beaten = persistenceNote(daily?.ward);
+  const beaten = bt ? persistenceSentence(persistenceWins(bt.metrics, daily)) : null;
   const dayRow = (label: string, d: BtDay | undefined) => d && (
     <tr key={label}><td>{label}</td><td className="tab">{d.exceed_days} of {d.n}</td><td className="tab">{d.hits} / {d.misses} / {d.false_alarms}</td>
       <td className="tab">{n(d.f1_model, 2)} <span className="muted">vs {n(d.f1_persistence, 2)}</span></td><td className="tab">{n(d.brier, 3)}</td></tr>
@@ -124,13 +124,13 @@ export default async function ForecastPage() {
                   </tbody>
                 </table>
                 {daily.window && <p className="small" style={{ margin: "12px 0 0" }}>The window held <b>{daily.window.ward_exceed_days} of {daily.window.ward_days} days</b> with the ward&apos;s measured 24 h mean above 100 µg/m³, and {daily.window.station_exceed_days} of {daily.window.station_days} station-days. Each measured day counts once, though days 1 to 3 of successive forecasts score it up to three times.</p>}
-                {beaten && <p className="small" style={{ margin: "8px 0 0" }}><b>{beaten}</b></p>}
                 <p className="small muted" style={{ margin: "8px 0 0" }}>
                   A day is the 24 hours after the issue time, needs 18 measured hours, and counts as called when the chance is 50% or more. Persistence calls a day above 100 when the 24 h before the issue time were.
                   Lower Brier scores are better.
                 </p>
               </div>
             )}
+            {beaten && <div className="pb"><p className="small" style={{ margin: 0 }}><b>{beaten}</b></p></div>}
           </section>
         )}
         <section className="panel">

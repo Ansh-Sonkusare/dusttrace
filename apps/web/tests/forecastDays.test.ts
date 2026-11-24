@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayHours, inputTrials, persistenceNote, stationDays, wardDays, weatherNote } from "../lib/forecastDays";
+import { dayHours, inputTrials, persistenceSentence, persistenceWins, stationDays, wardDays, weatherNote } from "../lib/forecastDays";
 
 const issued = "2026-11-23T06:00:00.000Z"; // 11:30 IST
 const block = (station_id: string, day: number, p: number) => ({
@@ -23,6 +23,12 @@ describe("daily exceedance (24 h mean above 100)", () => {
     expect(wardDays([])).toEqual([]);
   });
 
+  it("never says a day runs past the last forecast hour", () => {
+    const last = new Date(Date.parse(issued) + 71 * 3600_000).toISOString(); // the weather stopped at hour 71
+    expect(wardDays([block("ward", 3, 0.9)], last)[0].hours).toBe("Wed 12:30 to Thu 10:30");
+    expect(wardDays([block("ward", 1, 0.9)], last)[0].hours).toBe("Mon 12:30 to Tue 11:30");
+  });
+
   it("lines up each station's three days, without the ward", () => {
     const rows = [block("st-1", 2, 0.5), block("ward", 1, 0.1), block("st-1", 1, 0.3), block("st-1", 3, 0.7), block("st-2", 1, 0.2)];
     expect(stationDays(rows)).toEqual(new Map([["st-1", ["30%", "50%", "70%"]], ["st-2", ["20%", "–", "–"]]]));
@@ -40,16 +46,33 @@ describe("where the forecast stops", () => {
 });
 
 describe("back-test against persistence", () => {
-  const day = (f1_model: number | null, f1_persistence: number | null) =>
-    ({ n: 22, exceed_days: 17, hits: 17, misses: 0, false_alarms: 3, f1_model, f1_persistence, brier: 0.1 });
+  const day = (f1_model: number | null, f1_persistence: number | null) => ({ f1_model, f1_persistence });
+  const hours = (mae_model: number, mae_persistence: number, f1_exceed_model: number | null, f1_exceed_persistence: number | null) =>
+    ({ mae_model, mae_persistence, f1_exceed_model, f1_exceed_persistence });
+  // Real P-North, Sep 24 to Nov 23: persistence wins the 1-24 h error and the stations' day 1.
+  const pNorth = {
+    metrics: { "1-24": hours(20.87, 20.5, 0.663, 0.646), "25-48": hours(22.41, 24.48, 0.657, 0.528), "49-72": hours(23.07, 27.36, 0.675, 0.456) },
+    daily: { ward: { "1": day(0.778, 0.759) }, stations: { "1": day(0.764, 0.803), "2": day(0.754, 0.74) } },
+  };
 
-  it("says plainly when persistence calls the ward's days better than the model", () => {
-    expect(persistenceNote({ "1": day(0.919, 0.971), "2": day(0.872, 0.914), "3": day(0.9, 0.889) }))
-      .toBe("Persistence called the ward's days above 100 better than the model on days 1 and 2 (F1 0.97 and 0.91, against 0.92 and 0.87).");
-    expect(persistenceNote({ "1": day(0.919, 0.971), "3": day(0.9, 0.889) }))
-      .toBe("Persistence called the ward's days above 100 better than the model on day 1 (F1 0.97, against 0.92).");
-    expect(persistenceNote({ "1": day(0.95, 0.9), "2": day(null, null) })).toBeNull();
-    expect(persistenceNote(undefined)).toBeNull();
+  it("lists every hourly bucket and daily call where persistence beat the model", () => {
+    expect(persistenceWins(pNorth.metrics, pNorth.daily)).toEqual([
+      { scope: "hours 1–24", measure: "mean error, µg/m³", model: 20.9, persistence: 20.5 },
+      { scope: "stations, day 1", measure: "F1, 24 h mean above 100", model: 0.76, persistence: 0.8 },
+    ]);
+    expect(persistenceWins({ "1-24": hours(20, 22, 0.9, 0.91) }, { ward: { "1": day(0.896, 0.899) } })).toEqual([
+      { scope: "hours 1–24", measure: "F1, hours above 100", model: 0.9, persistence: 0.91 },
+      { scope: "ward, day 1", measure: "F1, 24 h mean above 100", model: 0.896, persistence: 0.899 }, // a third decimal when two would tie
+    ]);
+    expect(persistenceWins({ "1-24": hours(20, 22, null, null) }, { ward: { "1": day(null, 0.5) } })).toEqual([]);
+  });
+
+  it("says so in one plain sentence", () => {
+    expect(persistenceSentence(persistenceWins(pNorth.metrics, pNorth.daily)))
+      .toBe("Persistence beat the model at hours 1–24 on mean error (20.5 against 20.9 µg/m³) and on the stations' day-1 call (F1 0.80 against 0.76).");
+    expect(persistenceSentence(persistenceWins({ "1-24": hours(20, 22, 0.9, 0.91) }, { ward: { "1": day(0.896, 0.899) } })))
+      .toBe("Persistence beat the model at hours 1–24 on F1 for hours above 100 (0.91 against 0.90) and on the ward's day-1 call (F1 0.899 against 0.896).");
+    expect(persistenceSentence([])).toBeNull();
   });
 });
 
