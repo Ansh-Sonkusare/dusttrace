@@ -246,6 +246,8 @@ def run(conn, settings: Settings) -> dict:
     metrics = {**model.metrics, "stations": list(active), "audit": bench, "newest_real_reading": newest_real,
                "filled": fill_info, "inputs": verify_mod.input_shares(rd, t0),
                "forecast_hours": settings.forecast_hours, "forecast_inputs": inputs_on,
+               # Hours after t0 with a weather forecast. The PM10 forecast stops where it does.
+               "weather_hours": int(wx["ts"].between(t0 + pd.Timedelta(hours=1), t0 + pd.Timedelta(hours=settings.forecast_hours)).sum()),
                "signatures": {k: {x: v[x] for x in ("signature", "pm10", "ratio", "base_ratio", "ts")} for k, v in sigs.items()}}
     model_name = "lightgbm-direct-v1" + "".join(f"+{k}" for k, on in (("cams", inputs_on["cams"]), ("festival", inputs_on["festival"]),
                                                                        ("upwind-sites", inputs_on["upwind_sites"])) if on)

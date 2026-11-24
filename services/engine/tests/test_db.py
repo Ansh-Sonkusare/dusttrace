@@ -244,6 +244,19 @@ def test_run_forecasts_72_hours_and_stores_daily_exceedance_but_windows_stay_48(
     assert out["metrics"]["forecast_inputs"] == {"cams": False, "festival": False, "upwind_sites": False, "evidence": None}
 
 
+def test_the_forecast_stops_where_the_weather_forecast_does(conn, settings):
+    pipeline.ingest(conn, settings, mode="synthetic", days=60)
+    t0 = one(conn, "select max(ts) from readings")[0]
+    conn.execute("delete from weather_hourly where ts > %s", (t0 + pd.Timedelta(hours=60),))
+    conn.commit()
+    out = pipeline.run(conn, settings)
+    assert pd.Timestamp(out["issued_at"]) == t0
+    assert one(conn, "select count(*), max(ts) from forecasts where run_id=%s and station_id='ward'",
+               (out["run_id"],)) == (60, t0 + pd.Timedelta(hours=60))
+    assert out["metrics"]["weather_hours"] == 60 and out["metrics"]["forecast_hours"] == 72
+    assert [d["day"] for d in out["ward_days"]] == [1, 2]  # day 3 would have 12 of its 24 hours of weather
+
+
 def test_backtest_scores_49_to_72_hours_and_the_daily_calls(conn, settings):
     pipeline.ingest(conn, settings, mode="synthetic", days=90)
     out = pipeline.backtest(conn, settings, days=10)
