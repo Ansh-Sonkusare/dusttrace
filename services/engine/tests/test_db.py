@@ -131,7 +131,8 @@ def test_only_a_recent_scene_up_to_the_audited_week_counts_as_active(conn, setti
     now = pipeline.now_hour()
     for site, d in (("A", now - pd.Timedelta(days=10)),    # recent: counts
                     ("B", now - pd.Timedelta(days=200)),   # found today, but an old scene
-                    ("C", now + pd.Timedelta(days=5))):    # after the audited week
+                    ("C", now + pd.Timedelta(days=5)),     # after the audited week
+                    ("E", now)):                           # today: the id has no time, so it may be after the hour
         conn.execute("""insert into site_candidates (ward_id, scene_before, scene_after, lat, lon, area_m2, site_id)
                         values ('K-East', 'S2B_43QBV_20250101_0_L2A', %s, 19.1, 72.86, 9000, %s)""",
                      (f"S2B_43QBV_{d:%Y%m%d}_0_L2A", site))
@@ -139,7 +140,7 @@ def test_only_a_recent_scene_up_to_the_audited_week_counts_as_active(conn, setti
     out = pipeline.run(conn, settings)
     checks = dict(conn.execute("select site_id, checks from sensor_audits where run_id=%s", (out["run_id"],)).fetchall())
     assert checks["A"]["work_signature"]["imagery"] == f"{now - pd.Timedelta(days=10):%Y-%m-%d}"
-    assert checks["B"]["work_signature"]["imagery"] is None and checks["C"]["work_signature"]["imagery"] is None
+    assert all(checks[s]["work_signature"]["imagery"] is None for s in "BCE")
 
 
 def test_run_ranks_every_site_for_inspection(conn, settings):
