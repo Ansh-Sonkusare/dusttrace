@@ -57,6 +57,8 @@ def test_hours_past_the_weather_forecast_are_not_forecast(year, model):
     fc = forecast.predict(model, rd, short, END, horizon=72)
     assert fc.groupby("station_id")["ts"].max().eq(END + pd.Timedelta(hours=60)).all()
     assert forecast.predict_daily(model, rd, short, END)["day"].max() == 2  # day 3 has 12 of its 24 weather hours
+    almost = wx[wx["ts"] <= END + pd.Timedelta(hours=70)]
+    assert forecast.predict_daily(model, rd, almost, END)["day"].tolist() == [1, 2, 3] * 3  # 22 of 24 hours is enough
 
 
 def test_training_rows_past_48_hours_come_from_every_second_origin(year):

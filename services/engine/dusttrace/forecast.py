@@ -154,7 +154,8 @@ def daily_rows(readings: pd.DataFrame, wx: pd.DataFrame, origins: pd.DatetimeInd
     upwind sites) averaged over hours 24(d-1)+1 .. 24d after t0, and as target `y` the mean PM10 measured in
     those hours (MIN_HOURS of 24 or no target). The series are the stations and 'ward', their hourly mean."""
     w = _prep_weather(wx)
-    idx = pd.date_range(w.index.min(), w.index.max(), freq="h", tz="UTC")
+    last = w.index.max() if origins is None else max(w.index.max(), origins.max() + pd.Timedelta(hours=24 * DAYS))
+    idx = pd.date_range(w.index.min(), last, freq="h", tz="UTC")  # past the weather, so a day it mostly covers counts
     wx24 = w[WX_COLS].reindex(idx).rolling(24, min_periods=MIN_HOURS).mean()  # at hour e: hours e-23 .. e
     fest24 = pd.Series(festivals.flag(idx), index=idx).rolling(24).mean() if festival else None
     pm = {sid: _station_frame(readings, sid, idx) for sid in station_codes}
